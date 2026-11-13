@@ -1,0 +1,705 @@
+{
+  "entities": {
+    "ConnectionTest": {
+      "title": "ConnectionTest",
+      "description": "Connection test doc",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["status"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Platform super administrator record keyed by Firebase Auth UID",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile in LaundryOS",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "fullName": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "avatarUrl": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "isSuperAdmin": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "authUid", "email", "fullName"]
+    },
+    "Tenant": {
+      "title": "Tenant",
+      "description": "Independent laundry business tenant",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "tradeName": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "logoUrl": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "status": {
+          "type": "string",
+          "enum": ["trial", "active", "past_due", "suspended"]
+        },
+        "contactEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "contactPhone": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "currency": {
+          "type": "string",
+          "maxLength": 8
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "qrSettings": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "slug", "name", "status", "contactEmail", "currency"]
+    },
+    "TenantMembership": {
+      "title": "TenantMembership",
+      "description": "User role assignment inside a tenant",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "authUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["owner", "manager", "cashier", "staff"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "invited", "suspended"]
+        },
+        "branchId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "userId", "role", "status"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Physical branch of a laundry tenant",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "isMain": {
+          "type": "boolean"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "name", "code"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Laundry service pricing configuration",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "pricingUnit": {
+          "type": "string",
+          "enum": ["kg", "piece"]
+        },
+        "unitPriceCentavos": {
+          "type": "integer"
+        },
+        "minChargeCentavos": {
+          "type": "integer"
+        },
+        "minQuantity": {
+          "type": "number"
+        },
+        "defaultTurnaroundHours": {
+          "type": "integer"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "name", "pricingUnit", "unitPriceCentavos"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Tenant-isolated customer profile",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "branchId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "mobile": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "customerType": {
+          "type": "string",
+          "enum": ["walk_in", "pickup_delivery", "corporate"]
+        },
+        "washPreferences": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "totalOrders": {
+          "type": "integer"
+        },
+        "outstandingBalanceCentavos": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "branchId", "name", "mobile"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Laundry order record in centavos",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "branchId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "customerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "orderNumber": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "enum": ["received", "washing", "drying", "folding", "ready_for_pickup", "released", "cancelled"]
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["unpaid", "partial", "paid"]
+        },
+        "subtotalCentavos": {
+          "type": "integer"
+        },
+        "discountCentavos": {
+          "type": "integer"
+        },
+        "expressFeeCentavos": {
+          "type": "integer"
+        },
+        "totalCentavos": {
+          "type": "integer"
+        },
+        "paidCentavos": {
+          "type": "integer"
+        },
+        "balanceCentavos": {
+          "type": "integer"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "expectedReadyAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdByUserId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "branchId", "customerId", "orderNumber", "status", "paymentStatus", "totalCentavos"]
+    },
+    "OrderItem": {
+      "title": "OrderItem",
+      "description": "Snapshot line item of an order",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "orderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "serviceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "serviceNameSnapshot": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "pricingUnitSnapshot": {
+          "type": "string",
+          "enum": ["kg", "piece"]
+        },
+        "unitPriceCentavosSnapshot": {
+          "type": "integer"
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "subtotalCentavos": {
+          "type": "integer"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": ["id", "orderId", "serviceId", "serviceNameSnapshot", "pricingUnitSnapshot", "unitPriceCentavosSnapshot", "quantity", "subtotalCentavos"]
+    },
+    "OrderStatusHistory": {
+      "title": "OrderStatusHistory",
+      "description": "Immutable status transition record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "orderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "fromStatus": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "toStatus": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "changedByUserId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "orderId", "tenantId", "toStatus", "changedByUserId", "timestamp"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Immutable financial payment record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "orderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "amountCentavos": {
+          "type": "integer"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["cash", "qr_ph", "card", "other"]
+        },
+        "referenceNumber": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "cashierUserId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "orderId", "amountCentavos", "method", "referenceNumber", "cashierUserId", "createdAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "SaaS subscription metadata for a tenant",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["starter", "growth", "enterprise"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["trial", "active", "past_due", "cancelled"]
+        },
+        "trialEndsAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "currentPeriodEnd": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "maxBranches": {
+          "type": "integer"
+        },
+        "maxStaff": {
+          "type": "integer"
+        },
+        "monthlyFeeCentavos": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "tenantId", "plan", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable security and mutation audit event",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "tenantId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "entityType": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "entityId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "ipAddress": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "userAgent": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "action", "entityType", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/test/{connectionId}": {
+      "schema": "ConnectionTest",
+      "description": "Test collection for verifying Firestore connectivity"
+    },
+    "/admins/{userId}": {
+      "schema": "AdminRecord",
+      "description": "Platform administrator authorization records"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/tenants/{tenantId}": {
+      "schema": "Tenant",
+      "description": "Multi-tenant laundry businesses and QR settings"
+    },
+    "/tenants/{tenantId}/members/{memberId}": {
+      "schema": "TenantMembership",
+      "description": "Tenant-scoped user memberships and roles"
+    },
+    "/tenants/{tenantId}/branches/{branchId}": {
+      "schema": "Branch",
+      "description": "Tenant-scoped branch locations"
+    },
+    "/tenants/{tenantId}/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Tenant-scoped laundry services and pricing"
+    },
+    "/tenants/{tenantId}/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Tenant-isolated customer profiles"
+    },
+    "/tenants/{tenantId}/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Tenant-isolated laundry orders"
+    },
+    "/tenants/{tenantId}/orders/{orderId}/items/{itemId}": {
+      "schema": "OrderItem",
+      "description": "Order line items with pricing snapshots"
+    },
+    "/tenants/{tenantId}/orders/{orderId}/history/{historyId}": {
+      "schema": "OrderStatusHistory",
+      "description": "Order status transition audit log"
+    },
+    "/tenants/{tenantId}/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Tenant-isolated payment ledger"
+    },
+    "/tenants/{tenantId}/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Tenant-scoped audit trail"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "Tenant SaaS subscription metadata"
+    }
+  }
+}

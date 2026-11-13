@@ -1,0 +1,6 @@
+{
+  "name": "LaundryOS - Multi-Tenant Laundry SaaS",
+  "description": "Production-oriented multi-tenant laundry management SaaS for Philippines laundry businesses with tenant isolation, RBAC, and POS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
