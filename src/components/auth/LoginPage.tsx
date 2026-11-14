@@ -5,21 +5,31 @@ import { ShieldCheck, AlertCircle } from 'lucide-react';
 export const LoginPage: React.FC = () => {
   const { loginWithGoogle } = useAuth();
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [showRedirectFallback, setShowRedirectFallback] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (useRedirect = false) => {
     try {
       setLoginError(null);
       setGoogleLoading(true);
-      await loginWithGoogle();
+      await loginWithGoogle(useRedirect);
     } catch (err: unknown) {
       const rawMessage = err instanceof Error ? err.message : 'Google authentication was cancelled or failed.';
       if (rawMessage.includes('auth/unauthorized-domain')) {
         setLoginError(
           `This domain (${window.location.hostname}) is not yet added to Firebase Console → Authentication → Settings → Authorized domains.`
         );
-      } else if (rawMessage.includes('auth/popup-blocked')) {
-        setLoginError('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
+      } else if (
+        rawMessage.includes('auth/popup-blocked') ||
+        rawMessage.includes('auth/popup-closed-by-user') ||
+        rawMessage.includes('auth/cancelled-popup-request')
+      ) {
+        setShowRedirectFallback(true);
+        setLoginError(
+          rawMessage.includes('auth/popup-blocked')
+            ? 'Sign-in popup was blocked by your browser. Allow popups or use the redirect sign-in option below.'
+            : 'Google sign-in popup was closed before completing. Try again or use the redirect sign-in option below.'
+        );
       } else {
         setLoginError(rawMessage);
       }
@@ -64,7 +74,7 @@ export const LoginPage: React.FC = () => {
           {/* Google Sign-In with Firebase Auth */}
           <div className="space-y-3">
             <button
-              onClick={handleGoogleSignIn}
+              onClick={() => handleGoogleSignIn(false)}
               disabled={googleLoading}
               className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 active:scale-[0.99] transition-all shadow-xs min-h-[46px] disabled:opacity-60"
             >
@@ -92,6 +102,16 @@ export const LoginPage: React.FC = () => {
               )}
               <span>{googleLoading ? 'Signing in with Google...' : 'Continue with Google (Firebase Auth)'}</span>
             </button>
+
+            {showRedirectFallback && (
+              <button
+                onClick={() => handleGoogleSignIn(true)}
+                disabled={googleLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition-all min-h-[42px] disabled:opacity-60"
+              >
+                Use Full-Page Google Redirect Instead
+              </button>
+            )}
 
             <p className="text-[11px] text-center text-slate-500 leading-relaxed">
               Platform admins and registered laundry shop owners sign in with their authorized Google account — no separate password needed.

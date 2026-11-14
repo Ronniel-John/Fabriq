@@ -53,7 +53,7 @@ service cloud.firestore {
       return isVerified()
         && ('email' in request.auth.token)
         && ('ownerEmail' in get(/databases/$(database)/documents/tenants/$(tenantId)).data)
-        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerEmail == request.auth.token.email.lower();
+        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerEmail.lower() == request.auth.token.email.lower();
     }
 
     // 3. Entity Validation Blueprints

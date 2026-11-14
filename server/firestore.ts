@@ -430,9 +430,9 @@ class FirestoreRepository {
       fsUser = {
         id: fbUser.uid,
         authUid: fbUser.uid,
-        email: fbUser.email,
-        fullName: fbUser.displayName || fbUser.email.split('@')[0] || 'Fabriq User',
-        avatarUrl: fbUser.photoUrl || '',
+        email: fbUser.email.slice(0, 255),
+        fullName: (fbUser.displayName || fbUser.email.split('@')[0] || 'Fabriq User').slice(0, 255),
+        avatarUrl: (fbUser.photoUrl || '').slice(0, 1024),
         isSuperAdmin: isAdminEmail,
         createdAt: now,
         updatedAt: now,
@@ -495,60 +495,64 @@ class FirestoreRepository {
     }
 
     for (const t of tenants) {
-      const existingMember = await getFirestoreDoc<TenantMembership>(
-        `tenants/${t.id}/members/${fbUser.uid}`,
-        idToken
-      ).catch(() => null);
+      try {
+        const existingMember = await getFirestoreDoc<TenantMembership>(
+          `tenants/${t.id}/members/${fbUser.uid}`,
+          idToken
+        ).catch(() => null);
 
-      const isAssignedOwner = Boolean(
-        t.ownerEmail && fbUser.email && t.ownerEmail.trim().toLowerCase() === fbUser.email.trim().toLowerCase()
-      );
+        const isAssignedOwner = Boolean(
+          t.ownerEmail && fbUser.email && t.ownerEmail.trim().toLowerCase() === fbUser.email.trim().toLowerCase()
+        );
 
-      if (isAssignedOwner || isAdminEmail) {
-        let activeMember = existingMember;
-        if (!existingMember || existingMember.status !== 'active' || existingMember.role !== 'owner') {
-          const branches = isAdminEmail ? await this.getBranchesByTenant(t.id, idToken).catch(() => []) : [];
-          const newMem: TenantMembership & { authUid: string } = {
-            id: fbUser.uid,
-            tenantId: t.id,
-            userId: fsUser.id,
-            authUid: fbUser.uid,
-            role: 'owner',
-            status: 'active',
-            branchId: existingMember?.branchId || branches[0]?.id,
-            createdAt: existingMember?.createdAt || now,
-            updatedAt: now,
-          };
-          await setFirestoreDoc(
-            `tenants/${t.id}/members/${fbUser.uid}`,
-            newMem as unknown as Record<string, unknown>,
-            idToken
-          );
-          activeMember = newMem;
+        if (isAssignedOwner || isAdminEmail) {
+          let activeMember = existingMember;
+          if (!existingMember || existingMember.status !== 'active' || existingMember.role !== 'owner') {
+            const branches = isAdminEmail ? await this.getBranchesByTenant(t.id, idToken).catch(() => []) : [];
+            const newMem: TenantMembership & { authUid: string } = {
+              id: fbUser.uid,
+              tenantId: t.id,
+              userId: fsUser.id,
+              authUid: fbUser.uid,
+              role: 'owner',
+              status: 'active',
+              branchId: existingMember?.branchId || branches[0]?.id,
+              createdAt: existingMember?.createdAt || now,
+              updatedAt: now,
+            };
+            await setFirestoreDoc(
+              `tenants/${t.id}/members/${fbUser.uid}`,
+              newMem as unknown as Record<string, unknown>,
+              idToken
+            );
+            activeMember = newMem;
+          }
+          if (activeMember) {
+            memberships.push(activeMember);
+          }
+
+          const tenantWithMeta = t as Tenant & { memberUids?: string[]; ownerUid?: string };
+          const currentUids = Array.isArray(tenantWithMeta.memberUids) ? tenantWithMeta.memberUids : [];
+          const needsMemberUid = !currentUids.includes(fbUser.uid);
+          const needsOwnerUid = isAssignedOwner
+            ? tenantWithMeta.ownerUid !== fbUser.uid
+            : !tenantWithMeta.ownerUid;
+
+          if (needsMemberUid || needsOwnerUid) {
+            const updatedTenantDoc = {
+              ...tenantWithMeta,
+              ownerUid: isAssignedOwner ? fbUser.uid : tenantWithMeta.ownerUid || fbUser.uid,
+              memberUids: needsMemberUid ? [...currentUids, fbUser.uid].slice(0, 50) : currentUids,
+              updatedAt: now,
+            };
+            await setFirestoreDoc(`tenants/${t.id}`, updatedTenantDoc, idToken).catch(() => {});
+            Object.assign(t, updatedTenantDoc);
+          }
+        } else if (existingMember && existingMember.status === 'active') {
+          memberships.push(existingMember);
         }
-        if (activeMember) {
-          memberships.push(activeMember);
-        }
-
-        const tenantWithMeta = t as Tenant & { memberUids?: string[]; ownerUid?: string };
-        const currentUids = Array.isArray(tenantWithMeta.memberUids) ? tenantWithMeta.memberUids : [];
-        const needsMemberUid = !currentUids.includes(fbUser.uid);
-        const needsOwnerUid = isAssignedOwner
-          ? tenantWithMeta.ownerUid !== fbUser.uid
-          : !tenantWithMeta.ownerUid;
-
-        if (needsMemberUid || needsOwnerUid) {
-          const updatedTenantDoc = {
-            ...tenantWithMeta,
-            ownerUid: isAssignedOwner ? fbUser.uid : tenantWithMeta.ownerUid || fbUser.uid,
-            memberUids: needsMemberUid ? [...currentUids, fbUser.uid].slice(0, 50) : currentUids,
-            updatedAt: now,
-          };
-          await setFirestoreDoc(`tenants/${t.id}`, updatedTenantDoc, idToken).catch(() => {});
-          Object.assign(t, updatedTenantDoc);
-        }
-      } else if (existingMember && existingMember.status === 'active') {
-        memberships.push(existingMember);
+      } catch (memberErr) {
+        console.warn(`Failed syncing membership for tenant ${t.id}:`, memberErr);
       }
     }
 
