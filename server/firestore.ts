@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type {
   Tenant,
   Branch,
@@ -30,12 +31,21 @@ interface FirebaseAppletConfig {
   firestoreDatabaseId: string;
 }
 
-const CONFIG_PATH = path.resolve(process.cwd(), 'firebase-applet-config.json');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 let cachedConfig: FirebaseAppletConfig | null = null;
 
 export function getFirebaseConfig(): FirebaseAppletConfig {
   if (!cachedConfig) {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    const candidates = [
+      path.resolve(process.cwd(), 'firebase-applet-config.json'),
+      path.resolve(__dirname, '..', 'firebase-applet-config.json'),
+    ];
+    const configPath = candidates.find((p) => fs.existsSync(p));
+    if (!configPath) {
+      throw new Error('firebase-applet-config.json not found in runtime bundle');
+    }
+    const raw = fs.readFileSync(configPath, 'utf-8');
     cachedConfig = JSON.parse(raw) as FirebaseAppletConfig;
   }
   return cachedConfig;
