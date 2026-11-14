@@ -30,7 +30,7 @@ service cloud.firestore {
     function isBootstrappedAdmin() {
       return isVerified()
         && ('email' in request.auth.token)
-        && request.auth.token.email.lower() == 'ronnieljohnorong23@gmail.com';
+        && request.auth.token.email.lower() == 'fabricantepriscia@gmail.com';
     }
 
     function isAdmin() {
@@ -363,9 +363,12 @@ service cloud.firestore {
         allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidOrder(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId));
         allow update: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidOrder(incoming()) && incoming().tenantId == existing().tenantId && (
           isAdmin() || (
-            existing().status != 'cancelled' && existing().status != 'released'
+            existing().status != 'cancelled'
             && isTenantMember(tenantId)
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paidCentavos', 'balanceCentavos', 'notes', 'updatedAt'])
+            && (
+              (existing().status != 'released' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paidCentavos', 'balanceCentavos', 'notes', 'updatedAt']))
+              || (existing().status == 'released' && incoming().status == 'released' && incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'paidCentavos', 'balanceCentavos', 'updatedAt']))
+            )
           )
         );
         allow delete: if false;

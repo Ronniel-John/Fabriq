@@ -21,7 +21,7 @@ import { SuperAdminPortal } from './components/admin/SuperAdminPortal.tsx';
 function MainApp() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [orderIntent, setOrderIntent] = useState<{ openNew: boolean; customerId?: string } | null>(null);
-  const { isAuthenticated, isLoading, error } = useAuth();
+  const { isAuthenticated, isLoading, error, user, tenant, logout } = useAuth();
 
   const openCounterOrder = (customerId?: string) => {
     setOrderIntent({ openNew: true, customerId });
@@ -65,28 +65,51 @@ function MainApp() {
     );
   }
 
+  const tenantScopedTabs = ['dashboard', 'orders', 'payments', 'customers', 'services', 'audit'];
+  const needsTenant = !tenant && tenantScopedTabs.includes(activeTab);
+
   return (
     <AppShell currentTab={activeTab} onTabChange={setActiveTab}>
-      {activeTab === 'dashboard' && (
-        <OverviewDashboard onNavigate={setActiveTab} onNewOrder={() => openCounterOrder()} />
+      {needsTenant && user?.isSuperAdmin ? (
+        <SuperAdminPortal />
+      ) : needsTenant ? (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-8 text-center max-w-lg mx-auto my-8 space-y-3">
+          <h2 className="text-base font-bold text-slate-900">No Laundry Shop Assigned Yet</h2>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Your Google account (<strong>{user?.email}</strong>) is signed in, but is not yet linked to a registered
+            laundry shop. Please ask your platform administrator to register your shop and assign your Google email.
+          </p>
+          <button
+            onClick={() => logout()}
+            className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800"
+          >
+            Sign Out
+          </button>
+        </div>
+      ) : (
+        <>
+          {activeTab === 'dashboard' && (
+            <OverviewDashboard onNavigate={setActiveTab} onNewOrder={() => openCounterOrder()} />
+          )}
+          {activeTab === 'orders' && (
+            <OrderList
+              openNewOrder={Boolean(orderIntent?.openNew)}
+              initialCustomerId={orderIntent?.customerId}
+              onClearNewOrderIntent={() => setOrderIntent(null)}
+              onNavigate={setActiveTab}
+            />
+          )}
+          {activeTab === 'payments' && <PaymentsModule />}
+          {activeTab === 'customers' && (
+            <CustomerList onCreateOrderForCustomer={(customerId) => openCounterOrder(customerId)} />
+          )}
+          {activeTab === 'services' && <ServiceList />}
+        </>
       )}
-      {activeTab === 'orders' && (
-        <OrderList
-          openNewOrder={Boolean(orderIntent?.openNew)}
-          initialCustomerId={orderIntent?.customerId}
-          onClearNewOrderIntent={() => setOrderIntent(null)}
-          onNavigate={setActiveTab}
-        />
-      )}
-      {activeTab === 'payments' && <PaymentsModule />}
-      {activeTab === 'customers' && (
-        <CustomerList onCreateOrderForCustomer={(customerId) => openCounterOrder(customerId)} />
-      )}
-      {activeTab === 'services' && <ServiceList />}
       {activeTab === 'security' && <TenantIsolationDemo />}
       {activeTab === 'schema' && <SchemaViewer />}
-      {activeTab === 'audit' && <AuditLogViewer />}
-      {activeTab === 'superadmin' && <SuperAdminPortal />}
+      {!needsTenant && activeTab === 'audit' && <AuditLogViewer />}
+      {!needsTenant && activeTab === 'superadmin' && <SuperAdminPortal />}
     </AppShell>
   );
 }

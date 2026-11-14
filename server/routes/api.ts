@@ -5,7 +5,7 @@
  * with local JSON fallback for unauthenticated sandbox demos.
  */
 
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import { serverDb } from '../db.ts';
 import { firestoreRepo, verifyFirebaseIdToken } from '../firestore.ts';
@@ -30,6 +30,12 @@ import type {
 
 const api = Router();
 
+const asyncHandler =
+  (fn: (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void> | void) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req as AuthenticatedRequest, res, next)).catch(next);
+  };
+
 // Apply user resolution to all API calls
 api.use(authenticateUser);
 
@@ -49,53 +55,56 @@ async function recordAudit(req: AuthenticatedRequest, log: Omit<AuditLog, 'id' |
 /**
  * Login with email or demo persona ID.
  */
-api.post('/auth/login', async (req: AuthenticatedRequest, res) => {
-  const { email, personaId } = req.body;
-  let user = personaId ? serverDb.getUserById(personaId) : null;
+api.post(
+  '/auth/login',
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { email, personaId } = req.body;
+    let user = personaId ? serverDb.getUserById(personaId) : null;
 
-  if (!user && email) {
-    user = serverDb.getUserByEmail(email);
-  }
-
-  if (!user) {
-    res.status(401).json({
-      error: 'Invalid credentials. User with this email does not exist.',
-      code: 'INVALID_CREDENTIALS',
-    });
-    return;
-  }
-
-  const memberships = serverDb.getMembershipsByUser(user.id);
-  let tenants = user.isSuperAdmin
-    ? serverDb.getTenants()
-    : memberships.map((m) => serverDb.getTenantById(m.tenantId)!).filter(Boolean);
-
-  if (req.firebaseIdToken) {
-    const fsTenants = await firestoreRepo.getTenants(req.firebaseIdToken, req.firebaseUser).catch(() => []);
-    if (fsTenants.length > 0) {
-      const allowedIds = new Set(tenants.map((t) => t.id));
-      tenants = user.isSuperAdmin ? fsTenants : fsTenants.filter((t) => allowedIds.has(t.id));
+    if (!user && email) {
+      user = serverDb.getUserByEmail(email);
     }
-  }
 
-  await recordAudit(req, {
-    tenantId: memberships[0]?.tenantId || null,
-    userId: user.id,
-    action: 'USER_LOGIN',
-    entityType: 'user',
-    entityId: user.id,
-    metadata: { method: personaId ? 'persona_quick_login' : 'email_password' },
-    ipAddress: req.ip,
-  });
+    if (!user) {
+      res.status(401).json({
+        error: 'Invalid credentials. User with this email does not exist.',
+        code: 'INVALID_CREDENTIALS',
+      });
+      return;
+    }
 
-  res.json({
-    user,
-    token: user.id,
-    memberships,
-    tenants,
-    storageMode: req.firebaseIdToken ? 'firestore' : 'local_sandbox',
-  });
-});
+    const memberships = serverDb.getMembershipsByUser(user.id);
+    let tenants = user.isSuperAdmin
+      ? serverDb.getTenants()
+      : memberships.map((m) => serverDb.getTenantById(m.tenantId)!).filter(Boolean);
+
+    if (req.firebaseIdToken) {
+      const fsTenants = await firestoreRepo.getTenants(req.firebaseIdToken, req.firebaseUser).catch(() => []);
+      if (fsTenants.length > 0) {
+        const allowedIds = new Set(tenants.map((t) => t.id));
+        tenants = user.isSuperAdmin ? fsTenants : fsTenants.filter((t) => allowedIds.has(t.id));
+      }
+    }
+
+    await recordAudit(req, {
+      tenantId: memberships[0]?.tenantId || null,
+      userId: user.id,
+      action: 'USER_LOGIN',
+      entityType: 'user',
+      entityId: user.id,
+      metadata: { method: personaId ? 'persona_quick_login' : 'email_password' },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      user,
+      token: user.id,
+      memberships,
+      tenants,
+      storageMode: req.firebaseIdToken ? 'firestore' : 'local_sandbox',
+    });
+  })
+);
 
 /**
  * Synchronize Google Firebase Auth user with Cloud Firestore & session.
@@ -224,19 +233,22 @@ api.post('/auth/google-sync', async (req: AuthenticatedRequest, res) => {
 /**
  * Logout route
  */
-api.post('/auth/logout', async (req: AuthenticatedRequest, res) => {
-  if (req.user) {
-    await recordAudit(req, {
-      tenantId: null,
-      userId: req.user.id,
-      action: 'USER_LOGOUT',
-      entityType: 'user',
-      entityId: req.user.id,
-      ipAddress: req.ip,
-    });
-  }
-  res.json({ success: true, message: 'Logged out successfully' });
-});
+api.post(
+  '/auth/logout',
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.user) {
+      await recordAudit(req, {
+        tenantId: null,
+        userId: req.user.id,
+        action: 'USER_LOGOUT',
+        entityType: 'user',
+        entityId: req.user.id,
+        ipAddress: req.ip,
+      });
+    }
+    res.json({ success: true, message: 'Logged out successfully' });
+  })
+);
 
 /**
  * Get current session profile, active memberships, and accessible tenants.
@@ -423,12 +435,12 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
 
     const newTenant = serverDb.createTenant({
       slug: baseSlug,
-      name: name.trim(),
-      tradeName: tradeName?.trim() || name.trim(),
+      name: name.trim().slice(0, 255),
+      tradeName: (tradeName?.trim() || name.trim()).slice(0, 255),
       status: validStatus,
-      contactEmail: contactEmail.trim(),
-      contactPhone: contactPhone?.trim() || '+63 917 000 0000',
-      ...(normalizedOwnerEmail ? { ownerEmail: normalizedOwnerEmail } : {}),
+      contactEmail: contactEmail.trim().slice(0, 255),
+      contactPhone: (contactPhone?.trim() || '+63 917 000 0000').slice(0, 64),
+      ...(normalizedOwnerEmail ? { ownerEmail: normalizedOwnerEmail.slice(0, 255) } : {}),
       currency: 'PHP',
     });
 
@@ -687,106 +699,121 @@ api.patch('/tenants/:tenantId/owner', requireAuth, requireSuperAdmin, async (req
 /**
  * Get single tenant info.
  */
-api.get('/tenants/:tenantId', requireTenant, async (req: AuthenticatedRequest, res) => {
-  const tenant = req.tenant!;
-  const branches = req.firebaseIdToken
-    ? await firestoreRepo.getBranchesByTenant(tenant.id, req.firebaseIdToken).catch(() =>
-        serverDb.getBranchesByTenant(tenant.id)
-      )
-    : serverDb.getBranchesByTenant(tenant.id);
-  const subscription = req.firebaseIdToken
-    ? (await firestoreRepo.getSubscriptionByTenant(tenant.id, req.firebaseIdToken).catch(() => undefined)) ||
-      serverDb.getSubscriptionByTenant(tenant.id)
-    : serverDb.getSubscriptionByTenant(tenant.id);
-  const membership = req.membership;
+api.get(
+  '/tenants/:tenantId',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenant = req.tenant!;
+    const branches = req.firebaseIdToken
+      ? await firestoreRepo.getBranchesByTenant(tenant.id, req.firebaseIdToken).catch(() =>
+          serverDb.getBranchesByTenant(tenant.id)
+        )
+      : serverDb.getBranchesByTenant(tenant.id);
+    const subscription = req.firebaseIdToken
+      ? (await firestoreRepo.getSubscriptionByTenant(tenant.id, req.firebaseIdToken).catch(() => undefined)) ||
+        serverDb.getSubscriptionByTenant(tenant.id)
+      : serverDb.getSubscriptionByTenant(tenant.id);
+    const membership = req.membership;
 
-  res.json({
-    ...tenant,
-    branches,
-    subscription,
-    currentRole: req.user?.isSuperAdmin ? 'super_admin' : membership?.role,
-  });
-});
+    res.json({
+      ...tenant,
+      branches,
+      subscription,
+      currentRole: req.user?.isSuperAdmin ? 'super_admin' : membership?.role,
+    });
+  })
+);
 
 /**
  * Update tenant settings (Owners only).
  */
-api.put('/tenants/:tenantId', requireTenant, requireRole(['owner']), async (req: AuthenticatedRequest, res) => {
-  const tenant = req.tenant!;
-  const { name, tradeName, contactEmail, contactPhone } = req.body;
+api.put(
+  '/tenants/:tenantId',
+  requireTenant,
+  requireRole(['owner']),
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenant = req.tenant!;
+    const { name, tradeName, contactEmail, contactPhone } = req.body;
 
-  if (name) tenant.name = name;
-  if (tradeName !== undefined) tenant.tradeName = tradeName;
-  if (contactEmail) tenant.contactEmail = contactEmail;
-  if (contactPhone) tenant.contactPhone = contactPhone;
-  tenant.updatedAt = new Date().toISOString();
+    if (name) tenant.name = String(name).trim().slice(0, 255);
+    if (tradeName !== undefined) tenant.tradeName = String(tradeName).trim().slice(0, 255);
+    if (contactEmail) tenant.contactEmail = String(contactEmail).trim().slice(0, 255);
+    if (contactPhone) tenant.contactPhone = String(contactPhone).trim().slice(0, 64);
+    tenant.updatedAt = new Date().toISOString();
 
-  if (req.firebaseIdToken) {
-    await firestoreRepo.saveTenant(tenant, req.firebaseIdToken);
-  }
-  const localTenant = serverDb.getTenantById(tenant.id);
-  if (localTenant) {
-    Object.assign(localTenant, tenant);
-    serverDb.commitChanges();
-  }
+    if (req.firebaseIdToken) {
+      await firestoreRepo.saveTenant(tenant, req.firebaseIdToken);
+    }
+    const localTenant = serverDb.getTenantById(tenant.id);
+    if (localTenant) {
+      Object.assign(localTenant, tenant);
+      serverDb.commitChanges();
+    }
 
-  await recordAudit(req, {
-    tenantId: tenant.id,
-    userId: req.user!.id,
-    action: 'TENANT_SETTINGS_UPDATED',
-    entityType: 'tenant',
-    entityId: tenant.id,
-    metadata: { updatedFields: req.body },
-    ipAddress: req.ip,
-  });
+    await recordAudit(req, {
+      tenantId: tenant.id,
+      userId: req.user!.id,
+      action: 'TENANT_SETTINGS_UPDATED',
+      entityType: 'tenant',
+      entityId: tenant.id,
+      metadata: { updatedFields: req.body },
+      ipAddress: req.ip,
+    });
 
-  res.json(tenant);
-});
+    res.json(tenant);
+  })
+);
 
 /**
  * List staff and role assignments in tenant.
  */
-api.get('/tenants/:tenantId/members', requireTenant, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsMembers = await firestoreRepo.getMembersByTenant(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-    if (fsMembers.length > 0) {
+api.get(
+  '/tenants/:tenantId/members',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsMembers = await firestoreRepo.getMembersByTenant(req.tenant!.id, req.firebaseIdToken);
       res.json(fsMembers);
       return;
     }
-  }
-  const members = serverDb.getMembershipsByTenant(req.tenant!.id);
-  res.json(members);
-});
+    const members = serverDb.getMembershipsByTenant(req.tenant!.id);
+    res.json(members);
+  })
+);
 
 /**
  * List branches for tenant.
  */
-api.get('/tenants/:tenantId/branches', requireTenant, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsBranches = await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-    if (fsBranches.length > 0) {
+api.get(
+  '/tenants/:tenantId/branches',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsBranches = await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken);
       res.json(fsBranches);
       return;
     }
-  }
-  const branches = serverDb.getBranchesByTenant(req.tenant!.id);
-  res.json(branches);
-});
+    const branches = serverDb.getBranchesByTenant(req.tenant!.id);
+    res.json(branches);
+  })
+);
 
 /**
  * List services & pricing for tenant.
  */
-api.get('/tenants/:tenantId/services', requireTenant, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsServices = await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-    if (fsServices.length > 0) {
+api.get(
+  '/tenants/:tenantId/services',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsServices = await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken);
       res.json(fsServices);
       return;
     }
-  }
-  const services = serverDb.getServicesByTenant(req.tenant!.id);
-  res.json(services);
-});
+    const services = serverDb.getServicesByTenant(req.tenant!.id);
+    res.json(services);
+  })
+);
 
 /**
  * Create or configure a service (Owners & Managers only).
@@ -795,7 +822,7 @@ api.post(
   '/tenants/:tenantId/services',
   requireTenant,
   requireRole(['owner', 'manager']),
-  async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, category, pricingUnit, unitPriceCentavos, minChargeCentavos, minQuantity, defaultTurnaroundHours } =
       req.body;
 
@@ -804,17 +831,18 @@ api.post(
       return;
     }
 
+    const normalizedUnit = pricingUnit === 'piece' ? 'piece' : 'kg';
     const now = new Date().toISOString();
     const newService: Service = {
-      id: `srv-${req.tenant!.slug}-${Date.now()}`,
+      id: `srv-${req.tenant!.slug}-${crypto.randomUUID().slice(0, 8)}`,
       tenantId: req.tenant!.id,
-      name,
-      category: category || 'General',
-      pricingUnit: pricingUnit as 'kg' | 'piece',
-      unitPriceCentavos: Math.round(Number(unitPriceCentavos)),
-      minChargeCentavos: Math.round(Number(minChargeCentavos || 0)),
-      minQuantity: Number(minQuantity || 1),
-      defaultTurnaroundHours: Math.round(Number(defaultTurnaroundHours || 24)),
+      name: String(name).trim().slice(0, 255),
+      category: String(category || 'General').trim().slice(0, 128),
+      pricingUnit: normalizedUnit,
+      unitPriceCentavos: Math.max(0, Math.round(Number(unitPriceCentavos))),
+      minChargeCentavos: Math.max(0, Math.round(Number(minChargeCentavos || 0))),
+      minQuantity: Math.max(0.1, Number(minQuantity || 1)),
+      defaultTurnaroundHours: Math.max(1, Math.round(Number(defaultTurnaroundHours || 24))),
       isActive: true,
       createdAt: now,
       updatedAt: now,
@@ -833,12 +861,12 @@ api.post(
       action: 'SERVICE_CREATED',
       entityType: 'service',
       entityId: newService.id,
-      metadata: { name, unitPriceCentavos: newService.unitPriceCentavos },
+      metadata: { name: newService.name, unitPriceCentavos: newService.unitPriceCentavos },
       ipAddress: req.ip,
     });
 
     res.status(201).json(newService);
-  }
+  })
 );
 
 // ============================================================================
@@ -848,84 +876,92 @@ api.post(
 /**
  * List customers for tenant.
  */
-api.get('/tenants/:tenantId/customers', requireTenant, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsCustomers = await firestoreRepo.getCustomersByTenant(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-    if (fsCustomers.length > 0) {
+api.get(
+  '/tenants/:tenantId/customers',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsCustomers = await firestoreRepo.getCustomersByTenant(req.tenant!.id, req.firebaseIdToken);
       res.json(fsCustomers);
       return;
     }
-  }
-  const customers = serverDb.getCustomersByTenant(req.tenant!.id);
-  res.json(customers);
-});
+    const customers = serverDb.getCustomersByTenant(req.tenant!.id);
+    res.json(customers);
+  })
+);
 
 /**
  * Create customer in tenant.
  */
-api.post('/tenants/:tenantId/customers', requireTenant, async (req: AuthenticatedRequest, res) => {
-  const { name, mobile, email, address, customerType, washPreferences, notes, branchId } = req.body as {
-    name?: string;
-    mobile?: string;
-    email?: string;
-    address?: string;
-    customerType?: 'walk_in' | 'pickup_delivery' | 'corporate';
-    washPreferences?: string;
-    notes?: string;
-    branchId?: string;
-  };
+api.post(
+  '/tenants/:tenantId/customers',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { name, mobile, email, address, customerType, washPreferences, notes, branchId } = req.body as {
+      name?: string;
+      mobile?: string;
+      email?: string;
+      address?: string;
+      customerType?: 'walk_in' | 'pickup_delivery' | 'corporate';
+      washPreferences?: string;
+      notes?: string;
+      branchId?: string;
+    };
 
-  if (!name?.trim() || !mobile?.trim()) {
-    res.status(400).json({ error: 'Name and mobile number are required' });
-    return;
-  }
+    if (!name?.trim() || !mobile?.trim()) {
+      res.status(400).json({ error: 'Name and mobile number are required' });
+      return;
+    }
 
-  const validCustomerTypes = ['walk_in', 'pickup_delivery', 'corporate'] as const;
-  const resolvedType =
-    customerType && validCustomerTypes.includes(customerType) ? customerType : 'walk_in';
+    const validCustomerTypes = ['walk_in', 'pickup_delivery', 'corporate'] as const;
+    const resolvedType =
+      customerType && validCustomerTypes.includes(customerType) ? customerType : 'walk_in';
 
-  const branches = req.firebaseIdToken
-    ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
-        serverDb.getBranchesByTenant(req.tenant!.id)
-      )
-    : serverDb.getBranchesByTenant(req.tenant!.id);
-  const targetBranchId =
-    (branchId && branches.some((b) => b.id === branchId) ? branchId : branches[0]?.id) ||
-    `b-${req.tenant!.slug}-01`;
+    const branches = req.firebaseIdToken
+      ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
+          serverDb.getBranchesByTenant(req.tenant!.id)
+        )
+      : serverDb.getBranchesByTenant(req.tenant!.id);
+    const targetBranchId =
+      (branchId && branches.some((b) => b.id === branchId) ? branchId : branches[0]?.id) ||
+      `b-${req.tenant!.slug}-01`;
 
-  const customer = serverDb.createCustomer(req.tenant!.id, {
-    branchId: targetBranchId,
-    name: name.trim().slice(0, 255),
-    mobile: mobile.trim().slice(0, 64),
-    email: email?.trim() ? email.trim().slice(0, 255) : undefined,
-    address: address?.trim() ? address.trim().slice(0, 500) : undefined,
-    customerType: resolvedType,
-    washPreferences: washPreferences?.trim() ? washPreferences.trim().slice(0, 500) : undefined,
-    notes: notes?.trim() ? notes.trim().slice(0, 1000) : undefined,
-  });
+    const customer = serverDb.createCustomer(req.tenant!.id, {
+      branchId: targetBranchId,
+      name: name.trim().slice(0, 255),
+      mobile: mobile.trim().slice(0, 64),
+      email: email?.trim() ? email.trim().slice(0, 255) : undefined,
+      address: address?.trim() ? address.trim().slice(0, 500) : undefined,
+      customerType: resolvedType,
+      washPreferences: washPreferences?.trim() ? washPreferences.trim().slice(0, 500) : undefined,
+      notes: notes?.trim() ? notes.trim().slice(0, 1000) : undefined,
+    });
 
-  if (req.firebaseIdToken) {
-    await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
-  }
+    if (req.firebaseIdToken) {
+      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+    }
 
-  await recordAudit(req, {
-    tenantId: req.tenant!.id,
-    userId: req.user!.id,
-    action: 'CUSTOMER_CREATED',
-    entityType: 'customer',
-    entityId: customer.id,
-    metadata: { name: customer.name, mobile: customer.mobile, customerType: resolvedType },
-    ipAddress: req.ip,
-  });
+    await recordAudit(req, {
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'CUSTOMER_CREATED',
+      entityType: 'customer',
+      entityId: customer.id,
+      metadata: { name: customer.name, mobile: customer.mobile, customerType: resolvedType },
+      ipAddress: req.ip,
+    });
 
-  res.status(201).json(customer);
-});
+    res.status(201).json(customer);
+  })
+);
 
 /**
  * Update existing customer profile in tenant.
  */
-api.put('/tenants/:tenantId/customers/:customerId', requireTenant, async (req: AuthenticatedRequest, res) => {
-  try {
+api.put(
+  '/tenants/:tenantId/customers/:customerId',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { customerId } = req.params;
     const { name, mobile, email, address, customerType, washPreferences, notes, branchId } = req.body as {
       name?: string;
@@ -1001,11 +1037,8 @@ api.put('/tenants/:tenantId/customers/:customerId', requireTenant, async (req: A
     });
 
     res.json(updated);
-  } catch (err) {
-    console.error('PUT /tenants/:tenantId/customers/:customerId error:', err);
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update customer' });
-  }
-});
+  })
+);
 
 // ============================================================================
 // 4. ORDERS & CALCULATIONS APIS (Tenant-Scoped)
@@ -1014,263 +1047,281 @@ api.put('/tenants/:tenantId/customers/:customerId', requireTenant, async (req: A
 /**
  * List orders for tenant.
  */
-api.get('/tenants/:tenantId/orders', requireTenant, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsOrders = await firestoreRepo.getOrdersByTenant(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-    if (fsOrders.length > 0) {
+api.get(
+  '/tenants/:tenantId/orders',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsOrders = await firestoreRepo.getOrdersByTenant(req.tenant!.id, req.firebaseIdToken);
       res.json(fsOrders);
       return;
     }
-  }
-  const orders = serverDb.getOrdersByTenant(req.tenant!.id);
-  res.json(orders);
-});
+    const orders = serverDb.getOrdersByTenant(req.tenant!.id);
+    res.json(orders);
+  })
+);
 
 /**
  * Get single order with history.
  */
-api.get('/tenants/:tenantId/orders/:orderId', requireTenant, async (req: AuthenticatedRequest, res) => {
-  const order = req.firebaseIdToken
-    ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
-      serverDb.getOrderById(req.tenant!.id, req.params.orderId)
-    : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
+api.get(
+  '/tenants/:tenantId/orders/:orderId',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const order = req.firebaseIdToken
+      ? await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken)
+      : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
 
-  if (!order) {
-    res.status(404).json({ error: 'Order not found in this tenant' });
-    return;
-  }
-  res.json(order);
-});
+    if (!order) {
+      res.status(404).json({ error: 'Order not found in this tenant' });
+      return;
+    }
+    res.json(order);
+  })
+);
 
 /**
  * Create order with server-side calculation and price snapshots.
  */
-api.post('/tenants/:tenantId/orders', requireTenant, async (req: AuthenticatedRequest, res) => {
-  const { customerId, branchId, items, discountCentavos = 0, expressFeeCentavos = 0, notes, expectedHours = 24 } =
-    req.body;
+api.post(
+  '/tenants/:tenantId/orders',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { customerId, branchId, items, discountCentavos = 0, expressFeeCentavos = 0, notes, expectedHours = 24 } =
+      req.body;
 
-  if (!customerId || !Array.isArray(items) || items.length === 0) {
-    res.status(400).json({ error: 'Customer and at least one line item required' });
-    return;
-  }
-
-  const customer = req.firebaseIdToken
-    ? (await firestoreRepo.getCustomerById(req.tenant!.id, customerId, req.firebaseIdToken).catch(() => null)) ||
-      serverDb.getCustomerById(req.tenant!.id, customerId)
-    : serverDb.getCustomerById(req.tenant!.id, customerId);
-
-  if (!customer) {
-    res.status(400).json({ error: 'Customer not found in this tenant' });
-    return;
-  }
-
-  const branches = req.firebaseIdToken
-    ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
-        serverDb.getBranchesByTenant(req.tenant!.id)
-      )
-    : serverDb.getBranchesByTenant(req.tenant!.id);
-  const targetBranch = branches.find((b) => b.id === branchId) || branches[0];
-  const targetBranchId = targetBranch?.id || customer.branchId || `b-${req.tenant!.slug}-01`;
-
-  const services = req.firebaseIdToken
-    ? await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
-        serverDb.getServicesByTenant(req.tenant!.id)
-      )
-    : serverDb.getServicesByTenant(req.tenant!.id);
-
-  let calculatedSubtotal = 0;
-  const orderId = `ord-${req.tenant!.slug}-${Date.now().toString().slice(-6)}`;
-  const orderItems = [];
-
-  for (const item of items) {
-    const service = services.find((s) => s.id === item.serviceId);
-    if (!service) {
-      res.status(400).json({ error: `Service ID ${item.serviceId} not found in this tenant` });
+    if (!customerId || !Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Customer and at least one line item required' });
       return;
     }
 
-    const qty = Number(item.quantity);
-    if (isNaN(qty) || qty <= 0) {
-      res.status(400).json({ error: 'Invalid quantity' });
+    const customer = req.firebaseIdToken
+      ? (await firestoreRepo.getCustomerById(req.tenant!.id, customerId, req.firebaseIdToken).catch(() => null)) ||
+        serverDb.getCustomerById(req.tenant!.id, customerId)
+      : serverDb.getCustomerById(req.tenant!.id, customerId);
+
+    if (!customer) {
+      res.status(400).json({ error: 'Customer not found in this tenant' });
       return;
     }
 
-    let itemSubtotal = Math.round(qty * service.unitPriceCentavos);
-    if (service.minChargeCentavos && itemSubtotal < service.minChargeCentavos) {
-      itemSubtotal = service.minChargeCentavos;
+    const branches = req.firebaseIdToken
+      ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
+          serverDb.getBranchesByTenant(req.tenant!.id)
+        )
+      : serverDb.getBranchesByTenant(req.tenant!.id);
+    const targetBranch = branches.find((b) => b.id === branchId) || branches[0];
+    const targetBranchId = targetBranch?.id || customer.branchId || `b-${req.tenant!.slug}-01`;
+
+    const services = req.firebaseIdToken
+      ? await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
+          serverDb.getServicesByTenant(req.tenant!.id)
+        )
+      : serverDb.getServicesByTenant(req.tenant!.id);
+
+    let calculatedSubtotal = 0;
+    const orderId = `ord-${req.tenant!.slug}-${crypto.randomUUID().slice(0, 8)}`;
+    const orderItems = [];
+
+    for (const item of items) {
+      const service = services.find((s) => s.id === item.serviceId);
+      if (!service) {
+        res.status(400).json({ error: `Service ID ${item.serviceId} not found in this tenant` });
+        return;
+      }
+
+      const qty = Number(item.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        res.status(400).json({ error: 'Invalid quantity' });
+        return;
+      }
+
+      let itemSubtotal = Math.round(qty * service.unitPriceCentavos);
+      if (service.minChargeCentavos && itemSubtotal < service.minChargeCentavos) {
+        itemSubtotal = service.minChargeCentavos;
+      }
+
+      calculatedSubtotal += itemSubtotal;
+
+      orderItems.push({
+        id: `item-${crypto.randomUUID().slice(0, 8)}`,
+        orderId,
+        serviceId: service.id,
+        serviceNameSnapshot: service.name.slice(0, 255),
+        pricingUnitSnapshot: service.pricingUnit,
+        unitPriceCentavosSnapshot: service.unitPriceCentavos,
+        quantity: qty,
+        subtotalCentavos: itemSubtotal,
+        notes: String(item.notes || '').slice(0, 500),
+      });
     }
 
-    calculatedSubtotal += itemSubtotal;
+    const discount = Math.max(0, Math.round(Number(discountCentavos) || 0));
+    const expressFee = Math.max(0, Math.round(Number(expressFeeCentavos) || 0));
+    const total = Math.max(0, calculatedSubtotal - discount + expressFee);
 
-    orderItems.push({
-      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      orderId,
-      serviceId: service.id,
-      serviceNameSnapshot: service.name,
-      pricingUnitSnapshot: service.pricingUnit,
-      unitPriceCentavosSnapshot: service.unitPriceCentavos,
-      quantity: qty,
-      subtotalCentavos: itemSubtotal,
-      notes: item.notes || '',
-    });
-  }
+    const now = new Date();
+    const readyTime = new Date(now.getTime() + (Number(expectedHours) || 24) * 3600000);
+    const orderNumber = `${req.tenant!.slug.toUpperCase().slice(0, 3)}-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  const discount = Math.max(0, Math.round(Number(discountCentavos) || 0));
-  const expressFee = Math.max(0, Math.round(Number(expressFeeCentavos) || 0));
-  const total = Math.max(0, calculatedSubtotal - discount + expressFee);
-
-  const now = new Date();
-  const readyTime = new Date(now.getTime() + (Number(expectedHours) || 24) * 3600000);
-  const orderNumber = `${req.tenant!.slug.toUpperCase().slice(0, 3)}-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-  const newOrder = {
-    id: orderId,
-    tenantId: req.tenant!.id,
-    branchId: targetBranchId,
-    customerId: customer.id,
-    orderNumber,
-    status: 'received' as OrderStatus,
-    paymentStatus: 'unpaid' as const,
-    subtotalCentavos: calculatedSubtotal,
-    discountCentavos: discount,
-    expressFeeCentavos: expressFee,
-    totalCentavos: total,
-    paidCentavos: 0,
-    balanceCentavos: total,
-    notes: notes || '',
-    expectedReadyAt: readyTime.toISOString(),
-    createdByUserId: req.user!.id,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  };
-
-  const initialHistory = {
-    id: `hist-${Date.now()}`,
-    orderId: newOrder.id,
-    tenantId: req.tenant!.id,
-    fromStatus: null,
-    toStatus: 'received' as OrderStatus,
-    changedByUserId: req.user!.id,
-    notes: 'Order initiated at counter POS',
-    timestamp: now.toISOString(),
-  };
-
-  customer.totalOrders += 1;
-  customer.outstandingBalanceCentavos += total;
-  customer.updatedAt = now.toISOString();
-
-  if (req.firebaseIdToken) {
-    await firestoreRepo.saveOrder(req.tenant!.id, newOrder, req.firebaseIdToken);
-    for (const item of orderItems) {
-      await firestoreRepo.saveOrderItem(req.tenant!.id, newOrder.id, item, req.firebaseIdToken);
-    }
-    await firestoreRepo.saveOrderHistory(req.tenant!.id, newOrder.id, initialHistory, req.firebaseIdToken);
-    await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
-  }
-
-  const state = serverDb.getState();
-  state.orders.unshift(newOrder);
-  state.order_items.push(...orderItems);
-  state.order_status_history.push(initialHistory);
-  const localCust = serverDb.getCustomerById(req.tenant!.id, customer.id);
-  if (localCust) Object.assign(localCust, customer);
-  serverDb.commitChanges();
-
-  await recordAudit(req, {
-    tenantId: req.tenant!.id,
-    userId: req.user!.id,
-    action: 'ORDER_CREATED',
-    entityType: 'order',
-    entityId: newOrder.id,
-    metadata: {
+    const newOrder = {
+      id: orderId,
+      tenantId: req.tenant!.id,
+      branchId: targetBranchId,
+      customerId: customer.id,
       orderNumber,
+      status: 'received' as OrderStatus,
+      paymentStatus: 'unpaid' as const,
+      subtotalCentavos: calculatedSubtotal,
+      discountCentavos: discount,
+      expressFeeCentavos: expressFee,
       totalCentavos: total,
-      itemCount: orderItems.length,
-    },
-    ipAddress: req.ip,
-  });
+      paidCentavos: 0,
+      balanceCentavos: total,
+      notes: String(notes || '').slice(0, 1000),
+      expectedReadyAt: readyTime.toISOString(),
+      createdByUserId: req.user!.id,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
 
-  res.status(201).json({
-    ...newOrder,
-    items: orderItems,
-    customer,
-  });
-});
+    const initialHistory = {
+      id: `hist-${crypto.randomUUID().slice(0, 8)}`,
+      orderId: newOrder.id,
+      tenantId: req.tenant!.id,
+      fromStatus: null,
+      toStatus: 'received' as OrderStatus,
+      changedByUserId: req.user!.id,
+      notes: 'Order initiated at counter POS',
+      timestamp: now.toISOString(),
+    };
+
+    customer.totalOrders = (customer.totalOrders || 0) + 1;
+    customer.outstandingBalanceCentavos = (customer.outstandingBalanceCentavos || 0) + total;
+    customer.updatedAt = now.toISOString();
+
+    if (req.firebaseIdToken) {
+      await firestoreRepo.saveOrder(req.tenant!.id, newOrder, req.firebaseIdToken);
+      for (const item of orderItems) {
+        await firestoreRepo.saveOrderItem(req.tenant!.id, newOrder.id, item, req.firebaseIdToken);
+      }
+      await firestoreRepo.saveOrderHistory(req.tenant!.id, newOrder.id, initialHistory, req.firebaseIdToken);
+      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+    }
+
+    const state = serverDb.getState();
+    state.orders.unshift(newOrder);
+    state.order_items.push(...orderItems);
+    state.order_status_history.push(initialHistory);
+    const localCust = serverDb.getCustomerById(req.tenant!.id, customer.id);
+    if (localCust) Object.assign(localCust, customer);
+    serverDb.commitChanges();
+
+    await recordAudit(req, {
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'ORDER_CREATED',
+      entityType: 'order',
+      entityId: newOrder.id,
+      metadata: {
+        orderNumber,
+        totalCentavos: total,
+        itemCount: orderItems.length,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({
+      ...newOrder,
+      items: orderItems,
+      customer,
+    });
+  })
+);
 
 /**
  * Update order processing status.
  */
-api.post('/tenants/:tenantId/orders/:orderId/status', requireTenant, async (req: AuthenticatedRequest, res) => {
-  const { newStatus, notes } = req.body;
-  const order = req.firebaseIdToken
-    ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
-      serverDb.getOrderById(req.tenant!.id, req.params.orderId)
-    : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
+api.post(
+  '/tenants/:tenantId/orders/:orderId/status',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { newStatus, notes } = req.body;
+    const order = req.firebaseIdToken
+      ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
+        serverDb.getOrderById(req.tenant!.id, req.params.orderId)
+      : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
 
-  if (!order) {
-    res.status(404).json({ error: 'Order not found in this tenant' });
-    return;
-  }
+    if (!order) {
+      res.status(404).json({ error: 'Order not found in this tenant' });
+      return;
+    }
 
-  const validStatuses: OrderStatus[] = [
-    'received',
-    'washing',
-    'drying',
-    'folding',
-    'ready_for_pickup',
-    'released',
-    'cancelled',
-  ];
+    if ((order.status === 'cancelled' || order.status === 'released') && !req.user?.isSuperAdmin) {
+      res.status(400).json({ error: `Order is already in terminal status "${order.status}" and cannot be transitioned.` });
+      return;
+    }
 
-  if (!validStatuses.includes(newStatus)) {
-    res.status(400).json({ error: `Invalid status: ${newStatus}` });
-    return;
-  }
+    const validStatuses: OrderStatus[] = [
+      'received',
+      'washing',
+      'drying',
+      'folding',
+      'ready_for_pickup',
+      'released',
+      'cancelled',
+    ];
 
-  const oldStatus = order.status;
-  const now = new Date().toISOString();
+    if (!validStatuses.includes(newStatus)) {
+      res.status(400).json({ error: `Invalid status: ${newStatus}` });
+      return;
+    }
 
-  const updatedOrder = { ...order, status: newStatus as OrderStatus, updatedAt: now };
+    const oldStatus = order.status;
+    const now = new Date().toISOString();
 
-  const historyEntry = {
-    id: `hist-${Date.now()}`,
-    orderId: updatedOrder.id,
-    tenantId: req.tenant!.id,
-    fromStatus: oldStatus,
-    toStatus: newStatus as OrderStatus,
-    changedByUserId: req.user!.id,
-    notes: notes || `Status changed from ${oldStatus} to ${newStatus}`,
-    timestamp: now,
-  };
+    const updatedOrder = { ...order, status: newStatus as OrderStatus, updatedAt: now };
 
-  if (req.firebaseIdToken) {
-    await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken);
-    await firestoreRepo.saveOrderHistory(req.tenant!.id, updatedOrder.id, historyEntry, req.firebaseIdToken);
-  }
+    const historyEntry = {
+      id: `hist-${crypto.randomUUID().slice(0, 8)}`,
+      orderId: updatedOrder.id,
+      tenantId: req.tenant!.id,
+      fromStatus: oldStatus,
+      toStatus: newStatus as OrderStatus,
+      changedByUserId: req.user!.id,
+      notes: String(notes || `Status changed from ${oldStatus} to ${newStatus}`).slice(0, 500),
+      timestamp: now,
+    };
 
-  const localOrder = serverDb.getState().orders.find((o) => o.id === order.id);
-  if (localOrder) {
-    localOrder.status = newStatus;
-    localOrder.updatedAt = now;
-  }
-  serverDb.getState().order_status_history.push(historyEntry);
-  serverDb.commitChanges();
+    if (req.firebaseIdToken) {
+      await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken);
+      await firestoreRepo.saveOrderHistory(req.tenant!.id, updatedOrder.id, historyEntry, req.firebaseIdToken);
+    }
 
-  await recordAudit(req, {
-    tenantId: req.tenant!.id,
-    userId: req.user!.id,
-    action: 'ORDER_STATUS_CHANGED',
-    entityType: 'order',
-    entityId: updatedOrder.id,
-    metadata: { fromStatus: oldStatus, toStatus: newStatus, notes },
-    ipAddress: req.ip,
-  });
+    const localOrder = serverDb.getState().orders.find((o) => o.id === order.id);
+    if (localOrder) {
+      localOrder.status = newStatus;
+      localOrder.updatedAt = now;
+    }
+    serverDb.getState().order_status_history.push(historyEntry);
+    serverDb.commitChanges();
 
-  res.json({
-    order: updatedOrder,
-    historyEntry,
-  });
-});
+    await recordAudit(req, {
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'ORDER_STATUS_CHANGED',
+      entityType: 'order',
+      entityId: updatedOrder.id,
+      metadata: { fromStatus: oldStatus, toStatus: newStatus, notes: historyEntry.notes },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      order: updatedOrder,
+      historyEntry,
+    });
+  })
+);
 
 // ============================================================================
 // 5. PAYMENTS & FINANCIAL APIS (Tenant-Scoped)
@@ -1279,140 +1330,177 @@ api.post('/tenants/:tenantId/orders/:orderId/status', requireTenant, async (req:
 /**
  * List tenant payments.
  */
-api.get('/tenants/:tenantId/payments', requireTenant, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsPayments = await firestoreRepo.getPaymentsByTenant(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-    if (fsPayments.length > 0) {
+api.get(
+  '/tenants/:tenantId/payments',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsPayments = await firestoreRepo.getPaymentsByTenant(req.tenant!.id, req.firebaseIdToken);
       res.json(fsPayments);
       return;
     }
-  }
-  const payments = serverDb.getPaymentsByTenant(req.tenant!.id);
-  res.json(payments);
-});
+    const payments = serverDb.getPaymentsByTenant(req.tenant!.id);
+    res.json(payments);
+  })
+);
 
 /**
  * Collect cash or QR Ph payment against an order.
  */
-api.post('/tenants/:tenantId/orders/:orderId/payments', requireTenant, async (req: AuthenticatedRequest, res) => {
-  const { amountCentavos, method, notes } = req.body;
-  const order = req.firebaseIdToken
-    ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
-      serverDb.getOrderById(req.tenant!.id, req.params.orderId)
-    : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
+api.post(
+  '/tenants/:tenantId/orders/:orderId/payments',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { amountCentavos, method, referenceNumber, notes } = req.body as {
+      amountCentavos?: number;
+      method?: string;
+      referenceNumber?: string;
+      notes?: string;
+    };
 
-  if (!order) {
-    res.status(404).json({ error: 'Order not found in this tenant' });
-    return;
-  }
+    const order = req.firebaseIdToken
+      ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
+        serverDb.getOrderById(req.tenant!.id, req.params.orderId)
+      : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
 
-  const amount = Math.round(Number(amountCentavos));
-  if (isNaN(amount) || amount <= 0) {
-    res.status(400).json({ error: 'Payment amount must be greater than zero' });
-    return;
-  }
-
-  if (amount > order.balanceCentavos) {
-    res.status(400).json({
-      error: `Payment amount (₱${(amount / 100).toFixed(2)}) exceeds outstanding balance (₱${(order.balanceCentavos / 100).toFixed(2)})`,
-    });
-    return;
-  }
-
-  const now = new Date().toISOString();
-
-  const paymentRecord = {
-    id: `pay-${Date.now()}`,
-    tenantId: req.tenant!.id,
-    orderId: order.id,
-    amountCentavos: amount,
-    method: (method as PaymentMethod) || 'cash',
-    referenceNumber: `${(method || 'cash').toUpperCase()}-${Date.now().toString().slice(-6)}`,
-    cashierUserId: req.user!.id,
-    notes: notes || '',
-    createdAt: now,
-  };
-
-  const newPaid = order.paidCentavos + amount;
-  const newBalance = order.totalCentavos - newPaid;
-  const updatedOrder = {
-    ...order,
-    paidCentavos: newPaid,
-    balanceCentavos: newBalance,
-    paymentStatus: (newBalance === 0 ? 'paid' : 'partial') as 'paid' | 'partial',
-    updatedAt: now,
-  };
-
-  const customer = req.firebaseIdToken
-    ? (await firestoreRepo.getCustomerById(req.tenant!.id, order.customerId, req.firebaseIdToken).catch(() => null)) ||
-      serverDb.getCustomerById(req.tenant!.id, order.customerId)
-    : serverDb.getCustomerById(req.tenant!.id, order.customerId);
-
-  if (customer) {
-    customer.outstandingBalanceCentavos = Math.max(0, customer.outstandingBalanceCentavos - amount);
-    customer.updatedAt = now;
-  }
-
-  if (req.firebaseIdToken) {
-    await firestoreRepo.savePayment(req.tenant!.id, paymentRecord, req.firebaseIdToken);
-    await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken);
-    if (customer) {
-      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+    if (!order) {
+      res.status(404).json({ error: 'Order not found in this tenant' });
+      return;
     }
-  }
 
-  serverDb.getState().payments.push(paymentRecord);
-  const localOrder = serverDb.getState().orders.find((o) => o.id === order.id);
-  if (localOrder) {
-    localOrder.paidCentavos = newPaid;
-    localOrder.balanceCentavos = newBalance;
-    localOrder.paymentStatus = updatedOrder.paymentStatus;
-    localOrder.updatedAt = now;
-  }
-  const localCustomer = serverDb.getCustomerById(req.tenant!.id, order.customerId);
-  if (localCustomer && customer) {
-    localCustomer.outstandingBalanceCentavos = customer.outstandingBalanceCentavos;
-    localCustomer.updatedAt = now;
-  }
-  serverDb.commitChanges();
+    if (order.status === 'cancelled') {
+      res.status(400).json({ error: 'Cannot record payment against a cancelled order' });
+      return;
+    }
 
-  await recordAudit(req, {
-    tenantId: req.tenant!.id,
-    userId: req.user!.id,
-    action: 'PAYMENT_COLLECTED',
-    entityType: 'payment',
-    entityId: paymentRecord.id,
-    metadata: {
-      orderId: updatedOrder.id,
+    const amount = Math.round(Number(amountCentavos));
+    if (isNaN(amount) || amount <= 0) {
+      res.status(400).json({ error: 'Payment amount must be greater than zero' });
+      return;
+    }
+
+    if (amount > order.balanceCentavos) {
+      res.status(400).json({
+        error: `Payment amount (₱${(amount / 100).toFixed(2)}) exceeds outstanding balance (₱${(order.balanceCentavos / 100).toFixed(2)})`,
+      });
+      return;
+    }
+
+    const validMethods: PaymentMethod[] = ['cash', 'qr_ph', 'card', 'other'];
+    const resolvedMethod: PaymentMethod = validMethods.includes(method as PaymentMethod)
+      ? (method as PaymentMethod)
+      : 'cash';
+
+    const now = new Date().toISOString();
+    const cleanRef =
+      referenceNumber && String(referenceNumber).trim()
+        ? String(referenceNumber).trim().slice(0, 128)
+        : `${resolvedMethod.toUpperCase()}-${Date.now().toString().slice(-6)}`;
+
+    const paymentRecord = {
+      id: `pay-${crypto.randomUUID().slice(0, 8)}`,
+      tenantId: req.tenant!.id,
+      orderId: order.id,
       amountCentavos: amount,
-      method: paymentRecord.method,
-      newBalanceCentavos: updatedOrder.balanceCentavos,
-    },
-    ipAddress: req.ip,
-  });
+      method: resolvedMethod,
+      referenceNumber: cleanRef,
+      cashierUserId: req.user!.id,
+      notes: String(notes || '').slice(0, 500),
+      createdAt: now,
+    };
 
-  res.status(201).json({
-    payment: paymentRecord,
-    order: updatedOrder,
-  });
-});
+    const newPaid = (order.paidCentavos || 0) + amount;
+    const newBalance = Math.max(0, order.totalCentavos - newPaid);
+    const updatedOrder = {
+      ...order,
+      paidCentavos: newPaid,
+      balanceCentavos: newBalance,
+      paymentStatus: (newBalance === 0 ? 'paid' : 'partial') as 'paid' | 'partial',
+      updatedAt: now,
+    };
+
+    const customer = req.firebaseIdToken
+      ? (await firestoreRepo.getCustomerById(req.tenant!.id, order.customerId, req.firebaseIdToken).catch(() => null)) ||
+        serverDb.getCustomerById(req.tenant!.id, order.customerId)
+      : serverDb.getCustomerById(req.tenant!.id, order.customerId);
+
+    if (customer) {
+      customer.outstandingBalanceCentavos = Math.max(0, (customer.outstandingBalanceCentavos || 0) - amount);
+      customer.updatedAt = now;
+    }
+
+    if (req.firebaseIdToken) {
+      await firestoreRepo.savePayment(req.tenant!.id, paymentRecord, req.firebaseIdToken);
+      await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken);
+      if (customer) {
+        await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+      }
+    }
+
+    serverDb.getState().payments.push(paymentRecord);
+    const localOrder = serverDb.getState().orders.find((o) => o.id === order.id);
+    if (localOrder) {
+      localOrder.paidCentavos = newPaid;
+      localOrder.balanceCentavos = newBalance;
+      localOrder.paymentStatus = updatedOrder.paymentStatus;
+      localOrder.updatedAt = now;
+    }
+    const localCustomer = serverDb.getCustomerById(req.tenant!.id, order.customerId);
+    if (localCustomer && customer) {
+      localCustomer.outstandingBalanceCentavos = customer.outstandingBalanceCentavos;
+      localCustomer.updatedAt = now;
+    }
+    serverDb.commitChanges();
+
+    await recordAudit(req, {
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'PAYMENT_COLLECTED',
+      entityType: 'payment',
+      entityId: paymentRecord.id,
+      metadata: {
+        orderId: updatedOrder.id,
+        amountCentavos: amount,
+        method: paymentRecord.method,
+        referenceNumber: paymentRecord.referenceNumber,
+        newBalanceCentavos: updatedOrder.balanceCentavos,
+      },
+      ipAddress: req.ip,
+    });
+
+    const { items: _items, customer: _customer, history: _history, ...cleanOrderResponse } = updatedOrder as typeof updatedOrder & {
+      items?: unknown;
+      customer?: unknown;
+      history?: unknown;
+    };
+
+    res.status(201).json({
+      payment: paymentRecord,
+      order: cleanOrderResponse,
+    });
+  })
+);
 
 /**
  * Get tenant QR Ph & store payment presentation settings.
  */
-api.get('/tenants/:tenantId/qr-settings', requireTenant, async (req: AuthenticatedRequest, res) => {
-  let tenant = req.tenant;
-  if (req.firebaseIdToken && tenant) {
-    const fsTenant = await firestoreRepo.getTenantById(tenant.id, req.firebaseIdToken).catch(() => null);
-    if (fsTenant) tenant = fsTenant;
-  }
+api.get(
+  '/tenants/:tenantId/qr-settings',
+  requireTenant,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    let tenant = req.tenant;
+    if (req.firebaseIdToken && tenant) {
+      const fsTenant = await firestoreRepo.getTenantById(tenant.id, req.firebaseIdToken).catch(() => null);
+      if (fsTenant) tenant = fsTenant;
+    }
 
-  res.json({
-    qrSettings: tenant?.qrSettings || null,
-    tenantName: tenant?.name,
-    currency: tenant?.currency || 'PHP',
-  });
-});
+    res.json({
+      qrSettings: tenant?.qrSettings || null,
+      tenantName: tenant?.name,
+      currency: tenant?.currency || 'PHP',
+    });
+  })
+);
 
 /**
  * Update tenant QR code image and presentation details (Owner & Manager only).
@@ -1421,7 +1509,7 @@ api.put(
   '/tenants/:tenantId/qr-settings',
   requireTenant,
   requireRole(['owner', 'manager']),
-  async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { qrCodeImageUrl, merchantName, accountName, accountNumber, provider, notes } = req.body;
 
     if (!qrCodeImageUrl) {
@@ -1436,13 +1524,16 @@ api.put(
       return;
     }
 
+    const allowedProviders = ['qr_ph', 'gcash', 'maya', 'bank', 'other'] as const;
+    const resolvedProvider = allowedProviders.includes(provider) ? provider : 'qr_ph';
+
     const qrSettings = {
       qrCodeImageUrl,
-      merchantName: merchantName || req.tenant!.name,
-      accountName: accountName || '',
-      accountNumber: accountNumber || '',
-      provider: provider || 'qr_ph',
-      notes: notes || '',
+      merchantName: String(merchantName || req.tenant!.name).slice(0, 255),
+      accountName: String(accountName || '').slice(0, 255),
+      accountNumber: String(accountNumber || '').slice(0, 128),
+      provider: resolvedProvider,
+      notes: String(notes || '').slice(0, 1000),
       updatedAt: new Date().toISOString(),
     };
 
@@ -1465,8 +1556,8 @@ api.put(
       entityType: 'tenant',
       entityId: req.tenant!.id,
       metadata: {
-        provider: provider || 'qr_ph',
-        merchantName: merchantName || req.tenant!.name,
+        provider: resolvedProvider,
+        merchantName: qrSettings.merchantName,
         hasCustomImage: true,
       },
       ipAddress: req.ip,
@@ -1477,7 +1568,7 @@ api.put(
       qrSettings: updatedTenant.qrSettings,
       tenant: updatedTenant,
     });
-  }
+  })
 );
 
 // ============================================================================
@@ -1491,33 +1582,33 @@ api.get(
   '/tenants/:tenantId/audit-logs',
   requireTenant,
   requireRole(['owner', 'manager']),
-  async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsLogs = await firestoreRepo.getAuditLogs(req.tenant!.id, req.firebaseIdToken).catch(() => []);
-      if (fsLogs.length > 0) {
-        res.json(fsLogs);
-        return;
-      }
+      const fsLogs = await firestoreRepo.getAuditLogs(req.tenant!.id, req.firebaseIdToken);
+      res.json(fsLogs);
+      return;
     }
     const logs = serverDb.getAuditLogs(req.tenant!.id);
     res.json(logs);
-  }
+  })
 );
 
 /**
  * Super Admin all audit logs.
  */
-api.get('/admin/audit-logs', requireSuperAdmin, async (req: AuthenticatedRequest, res) => {
-  if (req.firebaseIdToken) {
-    const fsLogs = await firestoreRepo.getAllAdminAuditLogs(req.firebaseIdToken).catch(() => []);
-    if (fsLogs.length > 0) {
+api.get(
+  '/admin/audit-logs',
+  requireSuperAdmin,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (req.firebaseIdToken) {
+      const fsLogs = await firestoreRepo.getAllAdminAuditLogs(req.firebaseIdToken);
       res.json(fsLogs);
       return;
     }
-  }
-  const logs = serverDb.getAuditLogs();
-  res.json(logs);
-});
+    const logs = serverDb.getAuditLogs();
+    res.json(logs);
+  })
+);
 
 /**
  * Interactive Database Schema Inspector.
@@ -1718,67 +1809,98 @@ api.get('/system/schema', (_req, res) => {
 /**
  * Cross-Tenant Security Penetration Test API
  */
-api.post('/system/test-cross-tenant-boundary', async (req: AuthenticatedRequest, res) => {
-  const { attackerUserId, victimTenantId } = req.body;
+api.post(
+  '/system/test-cross-tenant-boundary',
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { attackerUserId, victimTenantId } = req.body as {
+      attackerUserId?: string;
+      victimTenantId?: string;
+    };
 
-  const user = serverDb.getUserById(attackerUserId || 'u-juan-cashier-bb') || req.user;
-  const victimTenant = serverDb.getTenantById(victimTenantId || 't-washandfold-002');
+    const user = (attackerUserId ? serverDb.getUserById(attackerUserId) : null) || req.user;
+    if (!user || !victimTenantId) {
+      res.status(400).json({ error: 'Authenticated user and target tenant ID are required' });
+      return;
+    }
 
-  if (!user || !victimTenant) {
-    res.status(400).json({ error: 'Invalid test parameters' });
-    return;
-  }
+    let victimTenant = req.firebaseIdToken
+      ? await firestoreRepo.getTenantById(victimTenantId, req.firebaseIdToken).catch(() => null)
+      : null;
+    if (!victimTenant) {
+      victimTenant = serverDb.getTenantById(victimTenantId) || null;
+    }
 
-  const membership = serverDb.findMembership(victimTenant.id, user.id);
+    if (!victimTenant) {
+      res.status(404).json({ error: 'Target tenant not found' });
+      return;
+    }
 
-  if (!membership && !user.isSuperAdmin) {
-    await recordAudit(req, {
-      tenantId: victimTenant.id,
-      userId: user.id,
-      action: 'SECURITY_CROSS_TENANT_VIOLATION_BLOCKED',
-      entityType: 'tenant_access',
-      entityId: victimTenant.id,
-      metadata: {
-        simulation: 'PENETRATION_TEST',
-        userEmail: user.email,
-        attemptedTarget: victimTenant.name,
-      },
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'] as string,
+    let membership = req.firebaseIdToken
+      ? await firestoreRepo.getMembershipForUid(victimTenant.id, user.authUid || user.id, req.firebaseIdToken).catch(() => null)
+      : null;
+    if (!membership) {
+      membership = serverDb.findMembership(victimTenant.id, user.id) || null;
+    }
+
+    if (!membership && !user.isSuperAdmin) {
+      await recordAudit(req, {
+        tenantId: victimTenant.id,
+        userId: user.id,
+        action: 'SECURITY_CROSS_TENANT_VIOLATION_BLOCKED',
+        entityType: 'tenant_access',
+        entityId: victimTenant.id,
+        metadata: {
+          simulation: 'PENETRATION_TEST',
+          userEmail: user.email,
+          attemptedTarget: victimTenant.name,
+        },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+      });
+
+      res.status(403).json({
+        success: false,
+        blocked: true,
+        statusCode: 403,
+        securityStatus: 'PASSED_SECURE',
+        message: `Cross-tenant access securely blocked by LaundryOS middleware! User "${user.fullName}" (${user.email}) has no authorization to access "${victimTenant.name}".`,
+        auditLogged: true,
+        details: {
+          user: { id: user.id, email: user.email },
+          targetTenant: { id: victimTenant.id, name: victimTenant.name },
+          policy: 'STRICT_TENANT_ISOLATION_AND_MEMBERSHIP_VERIFICATION',
+        },
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      blocked: false,
+      message: 'User is authorized for this tenant.',
     });
-
-    res.status(403).json({
-      success: false,
-      blocked: true,
-      statusCode: 403,
-      securityStatus: 'PASSED_SECURE',
-      message: `Cross-tenant access securely blocked by LaundryOS middleware! User "${user.fullName}" (${user.email}) has no authorization to access "${victimTenant.name}".`,
-      auditLogged: true,
-      details: {
-        user: { id: user.id, email: user.email },
-        targetTenant: { id: victimTenant.id, name: victimTenant.name },
-        policy: 'STRICT_TENANT_ISOLATION_AND_MEMBERSHIP_VERIFICATION',
-      },
-    });
-    return;
-  }
-
-  res.json({
-    success: true,
-    blocked: false,
-    message: 'User is authorized for this tenant.',
-  });
-});
+  })
+);
 
 /**
- * Reset database to pristine seed state.
+ * Clear local cache state.
  */
-api.post('/system/reset-demo', requireAuth, requireSuperAdmin, async (req: AuthenticatedRequest, res) => {
-  serverDb.resetToSeed();
-  if (req.firebaseIdToken && req.firebaseUser) {
-    await firestoreRepo.seedFirestore(req.firebaseUser, req.firebaseIdToken);
-  }
-  res.json({ message: 'Database reset to initial seed state successfully' });
+api.post(
+  '/system/reset-demo',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (_req: AuthenticatedRequest, res) => {
+    serverDb.resetToSeed();
+    res.json({ message: 'Local cache cleared successfully' });
+  })
+);
+
+// Centralized Express error handler for async API routes
+api.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('Unhandled API route error:', err);
+  const message = err instanceof Error ? err.message : 'Internal server error';
+  const status = message.includes('(403)') || message.includes('PERMISSION_DENIED') ? 403 : 500;
+  res.status(status).json({ error: message });
 });
 
 export default api;

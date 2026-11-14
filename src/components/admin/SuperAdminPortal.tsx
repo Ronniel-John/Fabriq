@@ -22,8 +22,6 @@ export const SuperAdminPortal: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [resetting, setResetting] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
   const [updatingTenantId, setUpdatingTenantId] = useState<string | null>(null);
 
   // Feedback banners
@@ -185,22 +183,6 @@ export const SuperAdminPortal: React.FC = () => {
     }
   };
 
-  const handleResetDemo = async () => {
-    setFeedbackError(null);
-    try {
-      setResetting(true);
-      await api.resetDemo();
-      setConfirmReset(false);
-      await refresh();
-      fetchAdminData();
-      setFeedbackSuccess({ message: 'Local demo sandbox restored to initial seed state.' });
-    } catch (err) {
-      setFeedbackError(err instanceof Error ? err.message : 'Reset failed');
-    } finally {
-      setResetting(false);
-    }
-  };
-
   return (
     <div className="space-y-5 sm:space-y-6">
       {/* Header */}
@@ -239,31 +221,6 @@ export const SuperAdminPortal: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
-
-          {!confirmReset ? (
-            <button
-              onClick={() => setConfirmReset(true)}
-              className="px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 active:scale-[0.98] transition-all min-h-[42px]"
-            >
-              Reset Demo
-            </button>
-          ) : (
-            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 rounded-xl p-1">
-              <button
-                onClick={handleResetDemo}
-                disabled={resetting}
-                className="px-2.5 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg min-h-[34px]"
-              >
-                {resetting ? 'Resetting...' : 'Confirm Reset'}
-              </button>
-              <button
-                onClick={() => setConfirmReset(false)}
-                className="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 min-h-[34px]"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -322,6 +279,15 @@ export const SuperAdminPortal: React.FC = () => {
           </div>
         </div>
 
+        {!loading && tenants.length === 0 ? (
+          <div className="p-8 text-center space-y-2">
+            <p className="text-sm font-semibold text-slate-800">No laundry shops registered yet</p>
+            <p className="text-xs text-slate-500">
+              Click <strong>Register New Laundry Shop</strong> above to onboard your first business.
+            </p>
+          </div>
+        ) : (
+        <>
         {/* Mobile Cards (< 640px) */}
         <div className="block sm:hidden divide-y divide-slate-100">
           {tenants.map((t) => {
@@ -500,6 +466,8 @@ export const SuperAdminPortal: React.FC = () => {
             </tbody>
           </table>
         </div>
+        </>
+        )}
       </div>
 
       {/* Global Platform Audit Logs */}

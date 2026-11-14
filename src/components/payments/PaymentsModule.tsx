@@ -301,9 +301,8 @@ export const PaymentsModule: React.FC = () => {
       await api.recordPayment(tenant.id, recordOrderId, {
         amountCentavos,
         method: recordMethod,
-        notes: recordRefNumber
-          ? `Ref: ${recordRefNumber}. ${recordNotes || ''}`
-          : recordNotes || '',
+        referenceNumber: recordRefNumber.trim() || undefined,
+        notes: recordNotes || '',
       });
 
       setShowRecordModal(false);

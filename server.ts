@@ -12,16 +12,22 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
+
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
+
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
 
   // Standard middleware (2mb limit supports QR code image uploads)
   app.use(express.json({ limit: '2mb' }));
 
-  // Mount API endpoints
-  app.use('/api', apiRouter);
-
-  // Health check endpoint
+  // Health check endpoint (fast path prior to auth middleware)
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'healthy',
@@ -31,6 +37,14 @@ async function startServer() {
       environment: process.env.NODE_ENV || 'development',
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // Mount API endpoints
+  app.use('/api', apiRouter);
+
+  // Return JSON 404 for unmatched API routes rather than SPA HTML
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found', code: 'NOT_FOUND' });
   });
 
   if (!isProd) {
@@ -50,7 +64,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`LaundryOS Server running on http://0.0.0.0:${PORT}`);
   });
 }

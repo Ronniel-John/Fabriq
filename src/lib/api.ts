@@ -302,6 +302,7 @@ class ApiClient {
   public async recordPayment(tenantId: string, orderId: string, payload: {
     amountCentavos: number;
     method: string;
+    referenceNumber?: string;
     notes?: string;
   }): Promise<{ payment: Payment; order: Order }> {
     return this.request(`/api/tenants/${tenantId}/orders/${orderId}/payments`, {

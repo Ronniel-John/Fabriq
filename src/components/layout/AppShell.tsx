@@ -103,33 +103,39 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
                   <div className="px-2.5 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                     Switch Operating Tenant:
                   </div>
-                  {allTenants.map((t) => {
-                    const isCurrent = t.id === tenant?.id;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => {
-                          switchTenant(t.id);
-                          setTenantDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between transition-colors ${
-                          isCurrent
-                            ? 'bg-indigo-50 font-semibold text-indigo-950 border border-indigo-100'
-                            : 'hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <div className="truncate pr-2">
-                          <div className="truncate">{t.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">{t.slug}</div>
-                        </div>
-                        {isCurrent && (
-                          <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-mono">
-                            ACTIVE
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
+                  {allTenants.length === 0 ? (
+                    <div className="px-2.5 py-2 text-slate-500 text-[11px]">
+                      No laundry shops registered yet.
+                    </div>
+                  ) : (
+                    allTenants.map((t) => {
+                      const isCurrent = t.id === tenant?.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            switchTenant(t.id);
+                            setTenantDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between transition-colors ${
+                            isCurrent
+                              ? 'bg-indigo-50 font-semibold text-indigo-950 border border-indigo-100'
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="truncate pr-2">
+                            <div className="truncate">{t.name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{t.slug}</div>
+                          </div>
+                          {isCurrent && (
+                            <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-mono">
+                              ACTIVE
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               </>
             )}
@@ -170,39 +176,43 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
                     </div>
                   </div>
 
-                  <div className="px-3 pt-2 pb-1 font-semibold text-slate-400 uppercase tracking-wider text-[10px]">
-                    Switch Role / Persona:
-                  </div>
-                  <div className="max-h-56 overflow-y-auto space-y-0.5">
-                    {personas.map((p) => {
-                      const isCurrent = p.id === user?.id;
-                      const firstMembership = p.memberships[0];
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => {
-                            switchUser(p.id);
-                            setPersonaDropdownOpen(false);
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-lg flex flex-col transition-colors ${
-                            isCurrent
-                              ? 'bg-indigo-50 border border-indigo-200 text-indigo-950 font-semibold'
-                              : 'hover:bg-slate-50 text-slate-700'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-medium text-slate-900 truncate pr-1">{p.name}</span>
-                            <span className="font-mono text-[9px] text-slate-500 uppercase shrink-0">
-                              {p.isSuperAdmin ? 'ADMIN' : firstMembership?.role || 'STAFF'}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate">
-                            {p.isSuperAdmin ? 'Platform Administrator' : firstMembership?.tenantName || p.email}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {personas.length > 0 && (
+                    <>
+                      <div className="px-3 pt-2 pb-1 font-semibold text-slate-400 uppercase tracking-wider text-[10px]">
+                        Switch Role / Persona:
+                      </div>
+                      <div className="max-h-56 overflow-y-auto space-y-0.5">
+                        {personas.map((p) => {
+                          const isCurrent = p.id === user?.id;
+                          const firstMembership = p.memberships[0];
+                          return (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                switchUser(p.id);
+                                setPersonaDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg flex flex-col transition-colors ${
+                                isCurrent
+                                  ? 'bg-indigo-50 border border-indigo-200 text-indigo-950 font-semibold'
+                                  : 'hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-slate-900 truncate pr-1">{p.name}</span>
+                                <span className="font-mono text-[9px] text-slate-500 uppercase shrink-0">
+                                  {p.isSuperAdmin ? 'ADMIN' : firstMembership?.role || 'STAFF'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate">
+                                {p.isSuperAdmin ? 'Platform Administrator' : firstMembership?.tenantName || p.email}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
                   <div className="pt-2 mt-1 border-t border-slate-100">
                     <button

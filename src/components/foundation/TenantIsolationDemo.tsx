@@ -5,19 +5,19 @@ import { ShieldCheck, ShieldAlert, AlertTriangle, Database, Lock, CheckCircle2 }
 
 export const TenantIsolationDemo: React.FC = () => {
   const { user, tenant, allTenants, currentRole } = useAuth();
-  const [targetTenantId, setTargetTenantId] = useState<string>('t-washandfold-002');
+  const otherTenants = allTenants.filter((t) => t.id !== tenant?.id);
+  const [targetTenantId, setTargetTenantId] = useState<string>(otherTenants[0]?.id || '');
   const [testResult, setTestResult] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
 
-  const otherTenants = allTenants.filter((t) => t.id !== tenant?.id);
-
   const runPenetrationTest = async () => {
     if (!user) return;
+    const target = targetTenantId || otherTenants[0]?.id || '';
+    if (!target) return;
     try {
       setIsRunning(true);
       setTestResult(null);
 
-      const target = targetTenantId || (otherTenants[0]?.id ?? 't-washandfold-002');
       const res = await api.testCrossTenantBoundary(user.id, target);
       setTestResult(res);
     } catch (err: any) {

@@ -7,7 +7,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { generateInitialSeed } from './db.ts';
 import type {
   Tenant,
   Branch,
@@ -362,7 +361,7 @@ export async function queryTenantsByOwnerEmail(email: string, idToken: string): 
 // LAUNDRYOS CLOUD FIRESTORE REPOSITORY
 // ============================================================================
 
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'ronnieljohnorong23@gmail.com';
+export const BOOTSTRAPPED_ADMIN_EMAIL = 'fabricantepriscia@gmail.com';
 
 class FirestoreRepository {
   private seededInSession = false;
@@ -418,28 +417,13 @@ class FirestoreRepository {
       }
     }
 
-    // 3. Seed Firestore if initial tenant doesn't exist yet (when admin logs in)
-    if (!this.seededInSession) {
-      const existingTenant1 = await getFirestoreDoc<Tenant>('tenants/t-bubblebrite-001', idToken).catch(() => null);
-      if (!existingTenant1 && isAdminEmail) {
-        await this.seedFirestore(fbUser, idToken);
-      }
-      this.seededInSession = true;
-    }
-
-    // 4. Load accessible tenants & ensure membership for this user
+    // 3. Load accessible tenants & ensure membership for this user
     let tenants: Tenant[] = [];
     const memberships: TenantMembership[] = [];
 
     if (isAdminEmail) {
       tenants = await listFirestoreCollection<Tenant>('tenants', idToken).catch(async () => {
-        const queried = await queryTenantsByMemberUid(fbUser.uid, idToken).catch(() => []);
-        if (queried.length > 0) return queried;
-        const known = await Promise.all([
-          getFirestoreDoc<Tenant>('tenants/t-bubblebrite-001', idToken).catch(() => null),
-          getFirestoreDoc<Tenant>('tenants/t-washfold-002', idToken).catch(() => null),
-        ]);
-        return known.filter((t): t is Tenant => Boolean(t));
+        return queryTenantsByMemberUid(fbUser.uid, idToken).catch(() => []);
       });
     } else {
       // For non-admin users, query both memberUids and assigned ownerEmail via filtered :runQuery.
@@ -454,36 +438,6 @@ class FirestoreRepository {
       const mapById = new Map<string, Tenant>();
       for (const qt of [...queriedByUid, ...queriedByEmail]) {
         mapById.set(qt.id, qt);
-      }
-
-      // Only fall back to default demo shop if the user has no assigned/member shops
-      if (mapById.size === 0) {
-        const existingDefaultMem = await getFirestoreDoc<TenantMembership>(
-          `tenants/t-bubblebrite-001/members/${fbUser.uid}`,
-          idToken
-        ).catch(() => null);
-
-        if (!existingDefaultMem) {
-          const defaultMem: TenantMembership & { authUid: string } = {
-            id: fbUser.uid,
-            tenantId: 't-bubblebrite-001',
-            userId: fsUser.id,
-            authUid: fbUser.uid,
-            role: 'staff',
-            status: 'active',
-            branchId: 'b-bb-main',
-            createdAt: now,
-            updatedAt: now,
-          };
-          await setFirestoreDoc(
-            `tenants/t-bubblebrite-001/members/${fbUser.uid}`,
-            defaultMem as unknown as Record<string, unknown>,
-            idToken
-          ).catch(() => {});
-        }
-
-        const defaultTenant = await getFirestoreDoc<Tenant>('tenants/t-bubblebrite-001', idToken).catch(() => null);
-        if (defaultTenant) mapById.set(defaultTenant.id, defaultTenant);
       }
 
       tenants = Array.from(mapById.values());
@@ -559,121 +513,6 @@ class FirestoreRepository {
     };
   }
 
-  /**
-   * Seeds initial Philippine LaundryOS tenants, branches, services, customers, orders, payments, and logs to Firestore.
-   */
-  public async seedFirestore(fbUser: VerifiedFirebaseUser, idToken: string): Promise<void> {
-    const seed = generateInitialSeed();
-
-    for (const tenant of seed.tenants) {
-      const tenantDoc = {
-        ...tenant,
-        ownerUid: fbUser.uid,
-        memberUids: [fbUser.uid],
-      };
-      await setFirestoreDoc(`tenants/${tenant.id}`, tenantDoc as unknown as Record<string, unknown>, idToken);
-
-      // Owner membership for bootstrapped admin
-      const branches = seed.branches.filter((b) => b.tenantId === tenant.id);
-      await setFirestoreDoc(
-        `tenants/${tenant.id}/members/${fbUser.uid}`,
-        {
-          id: fbUser.uid,
-          tenantId: tenant.id,
-          userId: fbUser.uid,
-          authUid: fbUser.uid,
-          role: 'owner',
-          status: 'active',
-          branchId: branches[0]?.id,
-          createdAt: tenant.createdAt,
-          updatedAt: tenant.updatedAt,
-        },
-        idToken
-      );
-    }
-
-    // Seed tenant memberships from initial seed (e.g. demo staff reference records)
-    for (const m of seed.tenant_memberships) {
-      await setFirestoreDoc(
-        `tenants/${m.tenantId}/members/${m.id}`,
-        m as unknown as Record<string, unknown>,
-        idToken
-      );
-    }
-
-    for (const sub of seed.subscriptions) {
-      await setFirestoreDoc(`subscriptions/${sub.id}`, sub as unknown as Record<string, unknown>, idToken);
-    }
-
-    for (const b of seed.branches) {
-      await setFirestoreDoc(
-        `tenants/${b.tenantId}/branches/${b.id}`,
-        b as unknown as Record<string, unknown>,
-        idToken
-      );
-    }
-
-    for (const s of seed.services) {
-      await setFirestoreDoc(
-        `tenants/${s.tenantId}/services/${s.id}`,
-        s as unknown as Record<string, unknown>,
-        idToken
-      );
-    }
-
-    for (const c of seed.customers) {
-      await setFirestoreDoc(
-        `tenants/${c.tenantId}/customers/${c.id}`,
-        c as unknown as Record<string, unknown>,
-        idToken
-      );
-    }
-
-    for (const o of seed.orders) {
-      await setFirestoreDoc(
-        `tenants/${o.tenantId}/orders/${o.id}`,
-        o as unknown as Record<string, unknown>,
-        idToken
-      );
-
-      const items = seed.order_items.filter((i) => i.orderId === o.id);
-      for (const item of items) {
-        await setFirestoreDoc(
-          `tenants/${o.tenantId}/orders/${o.id}/items/${item.id}`,
-          item as unknown as Record<string, unknown>,
-          idToken
-        );
-      }
-
-      const hist = seed.order_status_history.filter((h) => h.orderId === o.id);
-      for (const h of hist) {
-        await setFirestoreDoc(
-          `tenants/${o.tenantId}/orders/${o.id}/history/${h.id}`,
-          h as unknown as Record<string, unknown>,
-          idToken
-        );
-      }
-    }
-
-    for (const p of seed.payments) {
-      await setFirestoreDoc(
-        `tenants/${p.tenantId}/payments/${p.id}`,
-        p as unknown as Record<string, unknown>,
-        idToken
-      );
-    }
-
-    for (const log of seed.audit_logs) {
-      if (log.tenantId) {
-        await setFirestoreDoc(
-          `tenants/${log.tenantId}/audit_logs/${log.id}`,
-          log as unknown as Record<string, unknown>,
-          idToken
-        );
-      }
-    }
-  }
-
   // --- TENANTS ---
   public async getTenants(idToken: string, fbUser?: VerifiedFirebaseUser): Promise<Tenant[]> {
     if (fbUser && fbUser.email.toLowerCase() !== BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
@@ -688,9 +527,7 @@ class FirestoreRepository {
       for (const qt of [...queriedByUid, ...queriedByEmail]) {
         mapById.set(qt.id, qt);
       }
-      if (mapById.size > 0) return Array.from(mapById.values());
-      const defaultTenant = await this.getTenantById('t-bubblebrite-001', idToken).catch(() => null);
-      return defaultTenant ? [defaultTenant] : [];
+      return Array.from(mapById.values());
     }
     return listFirestoreCollection<Tenant>('tenants', idToken);
   }
@@ -810,8 +647,12 @@ class FirestoreRepository {
   }
 
   public async saveOrder(tenantId: string, order: Order, idToken: string): Promise<Order> {
-    // Strip virtual relations before saving to Firestore
-    const { items: _items, customer: _customer, ...cleanOrder } = order;
+    // Strip virtual relations before saving to Firestore so strict rules allowlists pass
+    const { items: _items, customer: _customer, history: _history, ...cleanOrder } = order as Order & {
+      items?: unknown;
+      customer?: unknown;
+      history?: unknown;
+    };
     return setFirestoreDoc<Order>(`tenants/${tenantId}/orders/${order.id}`, cleanOrder as Order, idToken);
   }
 
@@ -846,6 +687,7 @@ class FirestoreRepository {
   public async getSubscriptionByTenant(tenantId: string, idToken: string): Promise<Subscription | undefined> {
     const direct = await getFirestoreDoc<Subscription>(`subscriptions/sub-${tenantId}`, idToken).catch(() => null);
     if (direct) return direct;
+
     const subs = await listFirestoreCollection<Subscription>('subscriptions', idToken).catch(() => []);
     return subs.find((s) => s.tenantId === tenantId);
   }
@@ -874,6 +716,11 @@ class FirestoreRepository {
     if (!log.tenantId) return null;
     const newLog: AuditLog = {
       ...log,
+      action: log.action.slice(0, 128),
+      entityType: log.entityType.slice(0, 64),
+      entityId: log.entityId ? log.entityId.slice(0, 128) : null,
+      ipAddress: log.ipAddress ? log.ipAddress.slice(0, 64) : undefined,
+      userAgent: log.userAgent ? log.userAgent.slice(0, 512) : undefined,
       id: `log-${crypto.randomUUID()}`,
       createdAt: new Date().toISOString(),
     };

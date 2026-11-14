@@ -132,6 +132,10 @@
           "type": "string",
           "maxLength": 255
         },
+        "memberUids": {
+          "type": "array",
+          "description": "Member Firebase Auth UIDs belonging to this tenant"
+        },
         "qrSettings": {
           "type": "object"
         },

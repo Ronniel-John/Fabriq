@@ -25,18 +25,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handlePersonaClick = async (personaId: string) => {
-    try {
-      setLoginError(null);
-      setIsSubmitting(true);
-      await login(undefined, undefined, personaId);
-    } catch (err: any) {
-      setLoginError(err.message || 'Persona login failed.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleGoogleSignIn = async () => {
     try {
       setLoginError(null);
@@ -136,7 +124,7 @@ export const LoginPage: React.FC = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. maria@bubblebrite.ph"
+                  placeholder="owner@yourshop.ph"
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
                 />
               </div>
@@ -170,44 +158,6 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
-
-          {/* Method 3: One-Click Quick Login Personas */}
-          <div className="pt-4 border-t border-slate-200 space-y-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-900">One-Click Demonstration Roles:</span>
-              <span className="text-[11px] text-slate-400 font-mono">Instant RBAC & Tenant Test</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {personas.map((persona) => {
-                const membership = persona.memberships[0];
-                return (
-                  <button
-                    key={persona.id}
-                    type="button"
-                    onClick={() => handlePersonaClick(persona.id)}
-                    disabled={isSubmitting}
-                    className="text-left p-3 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 bg-slate-50/60 transition-all flex flex-col justify-between space-y-1 group min-h-[64px]"
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-semibold text-slate-900 text-xs group-hover:text-indigo-600 transition-colors">
-                        {persona.name}
-                      </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white border border-slate-200 uppercase font-medium text-slate-600">
-                        {persona.isSuperAdmin ? 'SUPER ADMIN' : membership?.role || 'STAFF'}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 truncate w-full flex items-center gap-1">
-                      <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
-                      <span className="truncate">
-                        {persona.isSuperAdmin ? 'Platform Administrator' : membership?.tenantName || persona.email}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {/* Security Guarantee Notice */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
