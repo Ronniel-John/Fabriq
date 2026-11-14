@@ -10,6 +10,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 // Error handling types & utility per Firebase integration skill

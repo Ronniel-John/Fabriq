@@ -292,13 +292,10 @@ service cloud.firestore {
         || isTenantMember(tenantId)
         || (('email' in request.auth.token) && ('ownerEmail' in existing()) && existing().ownerEmail == request.auth.token.email.lower())
       );
-      allow list: if isBootstrappedAdmin() || (
-        isVerified() && (
-          ('ownerUid' in resource.data && resource.data.ownerUid == request.auth.uid)
-          || (('email' in request.auth.token) && ('ownerEmail' in resource.data) && resource.data.ownerEmail == request.auth.token.email.lower())
-          || ('memberUids' in resource.data && request.auth.uid in resource.data.memberUids)
-        )
-      );
+      allow list: if isBootstrappedAdmin();
+      allow list: if isVerified() && resource.data.ownerUid == request.auth.uid;
+      allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+      allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
       allow create: if isVerified() && isValidId(tenantId) && isValidTenant(incoming()) && (
         isAdmin() || incoming().ownerUid == request.auth.uid
       );

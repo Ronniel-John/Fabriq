@@ -397,7 +397,8 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
       return;
     }
 
-    const normalizedOwnerEmail = ownerEmail?.trim().toLowerCase() || '';
+    const normalizedContactEmail = contactEmail.trim().toLowerCase();
+    const normalizedOwnerEmail = ownerEmail?.trim().toLowerCase() || normalizedContactEmail;
     if (normalizedOwnerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedOwnerEmail)) {
       res.status(400).json({ error: 'Please enter a valid Owner Google Email address' });
       return;

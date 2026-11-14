@@ -616,7 +616,7 @@ export const SuperAdminPortal: React.FC = () => {
 
               <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 space-y-1.5">
                 <label className="block font-semibold text-indigo-950">
-                  Shop Owner Google Email (Optional — No Password Needed)
+                  Shop Owner Google Email (Defaults to Contact Email if blank)
                 </label>
                 <input
                   type="email"

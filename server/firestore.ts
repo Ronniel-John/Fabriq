@@ -464,9 +464,15 @@ class FirestoreRepository {
       // For non-admin users, query both memberUids and assigned ownerEmail via filtered :runQuery.
       const normalizedEmail = fbUser.email.trim().toLowerCase();
       const [queriedByUid, queriedByEmail] = await Promise.all([
-        queryTenantsByMemberUid(fbUser.uid, idToken).catch(() => []),
+        queryTenantsByMemberUid(fbUser.uid, idToken).catch((err) => {
+          console.warn('queryTenantsByMemberUid failed:', err instanceof Error ? err.message : err);
+          return [];
+        }),
         normalizedEmail
-          ? queryTenantsByOwnerEmail(normalizedEmail, idToken).catch(() => [])
+          ? queryTenantsByOwnerEmail(normalizedEmail, idToken).catch((err) => {
+              console.warn('queryTenantsByOwnerEmail failed:', err instanceof Error ? err.message : err);
+              return [];
+            })
           : Promise.resolve([]),
       ]);
 
@@ -553,9 +559,15 @@ class FirestoreRepository {
     if (fbUser && fbUser.email.toLowerCase() !== BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
       const normalizedEmail = fbUser.email.trim().toLowerCase();
       const [queriedByUid, queriedByEmail] = await Promise.all([
-        queryTenantsByMemberUid(fbUser.uid, idToken).catch(() => []),
+        queryTenantsByMemberUid(fbUser.uid, idToken).catch((err) => {
+          console.warn('getTenants queryTenantsByMemberUid failed:', err instanceof Error ? err.message : err);
+          return [];
+        }),
         normalizedEmail
-          ? queryTenantsByOwnerEmail(normalizedEmail, idToken).catch(() => [])
+          ? queryTenantsByOwnerEmail(normalizedEmail, idToken).catch((err) => {
+              console.warn('getTenants queryTenantsByOwnerEmail failed:', err instanceof Error ? err.message : err);
+              return [];
+            })
           : Promise.resolve([]),
       ]);
       const mapById = new Map<string, Tenant>();
