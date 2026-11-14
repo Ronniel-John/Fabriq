@@ -42,7 +42,7 @@ api.use(authenticateUser);
 async function recordAudit(req: AuthenticatedRequest, log: Omit<AuditLog, 'id' | 'createdAt'>): Promise<void> {
   serverDb.logAudit(log);
   if (req.firebaseIdToken && log.tenantId) {
-    await firestoreRepo.logAudit(log, req.firebaseIdToken).catch((err) => {
+    await firestoreRepo.logAudit(log, req.firebaseIdToken, req.firebaseUser).catch((err) => {
       console.warn('Firestore audit log sync failed:', err instanceof Error ? err.message : err);
     });
   }
@@ -134,7 +134,8 @@ api.post('/auth/google-sync', async (req: AuthenticatedRequest, res) => {
             metadata: { email: verified.email, authUid: verified.uid, backend: 'firestore' },
             ipAddress: req.ip,
           },
-          token
+          token,
+          verified
         )
         .catch(() => {});
 
@@ -521,10 +522,10 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
         },
         req.firebaseIdToken
       );
-      await firestoreRepo.saveMembership(newTenant.id, newMembership, req.firebaseIdToken);
-      await firestoreRepo.saveBranch(newTenant.id, newBranch, req.firebaseIdToken);
+      await firestoreRepo.saveMembership(newTenant.id, newMembership, req.firebaseIdToken, req.firebaseUser);
+      await firestoreRepo.saveBranch(newTenant.id, newBranch, req.firebaseIdToken, req.firebaseUser);
       await firestoreRepo.saveSubscription(newSubscription, req.firebaseIdToken);
-      await firestoreRepo.saveService(newTenant.id, starterService, req.firebaseIdToken);
+      await firestoreRepo.saveService(newTenant.id, starterService, req.firebaseIdToken, req.firebaseUser);
     }
 
     // Update local JSON store after Firestore succeeds
@@ -677,6 +678,12 @@ api.patch('/tenants/:tenantId/owner', requireAuth, requireSuperAdmin, async (req
 
     if (req.firebaseIdToken) {
       await firestoreRepo.saveTenant(updated as unknown as typeof tenant, req.firebaseIdToken);
+      const memberUids = Array.isArray((tenant as { memberUids?: string[] }).memberUids)
+        ? (tenant as { memberUids?: string[] }).memberUids!
+        : [];
+      await firestoreRepo
+        .syncTenantSubcollectionMeta(tenantId, normalized || null, memberUids, req.firebaseIdToken)
+        .catch(() => {});
     }
 
     await recordAudit(req, {
@@ -710,7 +717,7 @@ api.get(
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenant = req.tenant!;
     const branches = req.firebaseIdToken
-      ? await firestoreRepo.getBranchesByTenant(tenant.id, req.firebaseIdToken).catch(() =>
+      ? await firestoreRepo.getBranchesByTenant(tenant.id, req.firebaseIdToken, req.firebaseUser).catch(() =>
           serverDb.getBranchesByTenant(tenant.id)
         )
       : serverDb.getBranchesByTenant(tenant.id);
@@ -777,7 +784,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsMembers = await firestoreRepo.getMembersByTenant(req.tenant!.id, req.firebaseIdToken);
+      const fsMembers = await firestoreRepo.getMembersByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsMembers);
       return;
     }
@@ -794,7 +801,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsBranches = await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken);
+      const fsBranches = await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsBranches);
       return;
     }
@@ -811,7 +818,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsServices = await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken);
+      const fsServices = await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsServices);
       return;
     }
@@ -854,7 +861,7 @@ api.post(
     };
 
     if (req.firebaseIdToken) {
-      await firestoreRepo.saveService(req.tenant!.id, newService, req.firebaseIdToken);
+      await firestoreRepo.saveService(req.tenant!.id, newService, req.firebaseIdToken, req.firebaseUser);
     }
 
     serverDb.getState().services.push(newService);
@@ -886,7 +893,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsCustomers = await firestoreRepo.getCustomersByTenant(req.tenant!.id, req.firebaseIdToken);
+      const fsCustomers = await firestoreRepo.getCustomersByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsCustomers);
       return;
     }
@@ -923,7 +930,7 @@ api.post(
       customerType && validCustomerTypes.includes(customerType) ? customerType : 'walk_in';
 
     const branches = req.firebaseIdToken
-      ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
+      ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser).catch(() =>
           serverDb.getBranchesByTenant(req.tenant!.id)
         )
       : serverDb.getBranchesByTenant(req.tenant!.id);
@@ -943,7 +950,7 @@ api.post(
     });
 
     if (req.firebaseIdToken) {
-      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken, req.firebaseUser);
     }
 
     await recordAudit(req, {
@@ -1022,7 +1029,7 @@ api.put(
     };
 
     if (req.firebaseIdToken) {
-      await firestoreRepo.saveCustomer(req.tenant!.id, updated, req.firebaseIdToken);
+      await firestoreRepo.saveCustomer(req.tenant!.id, updated, req.firebaseIdToken, req.firebaseUser);
     }
 
     const localCust = serverDb.getCustomerById(req.tenant!.id, customerId);
@@ -1057,7 +1064,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsOrders = await firestoreRepo.getOrdersByTenant(req.tenant!.id, req.firebaseIdToken);
+      const fsOrders = await firestoreRepo.getOrdersByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsOrders);
       return;
     }
@@ -1074,7 +1081,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const order = req.firebaseIdToken
-      ? await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken)
+      ? await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken, req.firebaseUser)
       : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
 
     if (!order) {
@@ -1111,7 +1118,7 @@ api.post(
     }
 
     const branches = req.firebaseIdToken
-      ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
+      ? await firestoreRepo.getBranchesByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser).catch(() =>
           serverDb.getBranchesByTenant(req.tenant!.id)
         )
       : serverDb.getBranchesByTenant(req.tenant!.id);
@@ -1119,7 +1126,7 @@ api.post(
     const targetBranchId = targetBranch?.id || customer.branchId || `b-${req.tenant!.slug}-01`;
 
     const services = req.firebaseIdToken
-      ? await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken).catch(() =>
+      ? await firestoreRepo.getServicesByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser).catch(() =>
           serverDb.getServicesByTenant(req.tenant!.id)
         )
       : serverDb.getServicesByTenant(req.tenant!.id);
@@ -1206,12 +1213,12 @@ api.post(
     customer.updatedAt = now.toISOString();
 
     if (req.firebaseIdToken) {
-      await firestoreRepo.saveOrder(req.tenant!.id, newOrder, req.firebaseIdToken);
+      await firestoreRepo.saveOrder(req.tenant!.id, newOrder, req.firebaseIdToken, req.firebaseUser);
       for (const item of orderItems) {
-        await firestoreRepo.saveOrderItem(req.tenant!.id, newOrder.id, item, req.firebaseIdToken);
+        await firestoreRepo.saveOrderItem(req.tenant!.id, newOrder.id, item, req.firebaseIdToken, req.firebaseUser);
       }
-      await firestoreRepo.saveOrderHistory(req.tenant!.id, newOrder.id, initialHistory, req.firebaseIdToken);
-      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+      await firestoreRepo.saveOrderHistory(req.tenant!.id, newOrder.id, initialHistory, req.firebaseIdToken, req.firebaseUser);
+      await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken, req.firebaseUser);
     }
 
     const state = serverDb.getState();
@@ -1253,7 +1260,7 @@ api.post(
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { newStatus, notes } = req.body;
     const order = req.firebaseIdToken
-      ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
+      ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken, req.firebaseUser).catch(() => null)) ||
         serverDb.getOrderById(req.tenant!.id, req.params.orderId)
       : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
 
@@ -1299,8 +1306,8 @@ api.post(
     };
 
     if (req.firebaseIdToken) {
-      await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken);
-      await firestoreRepo.saveOrderHistory(req.tenant!.id, updatedOrder.id, historyEntry, req.firebaseIdToken);
+      await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken, req.firebaseUser);
+      await firestoreRepo.saveOrderHistory(req.tenant!.id, updatedOrder.id, historyEntry, req.firebaseIdToken, req.firebaseUser);
     }
 
     const localOrder = serverDb.getState().orders.find((o) => o.id === order.id);
@@ -1340,7 +1347,7 @@ api.get(
   requireTenant,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsPayments = await firestoreRepo.getPaymentsByTenant(req.tenant!.id, req.firebaseIdToken);
+      const fsPayments = await firestoreRepo.getPaymentsByTenant(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsPayments);
       return;
     }
@@ -1364,7 +1371,7 @@ api.post(
     };
 
     const order = req.firebaseIdToken
-      ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken).catch(() => null)) ||
+      ? (await firestoreRepo.getOrderById(req.tenant!.id, req.params.orderId, req.firebaseIdToken, req.firebaseUser).catch(() => null)) ||
         serverDb.getOrderById(req.tenant!.id, req.params.orderId)
       : serverDb.getOrderById(req.tenant!.id, req.params.orderId);
 
@@ -1435,10 +1442,10 @@ api.post(
     }
 
     if (req.firebaseIdToken) {
-      await firestoreRepo.savePayment(req.tenant!.id, paymentRecord, req.firebaseIdToken);
-      await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken);
+      await firestoreRepo.savePayment(req.tenant!.id, paymentRecord, req.firebaseIdToken, req.firebaseUser);
+      await firestoreRepo.saveOrder(req.tenant!.id, updatedOrder, req.firebaseIdToken, req.firebaseUser);
       if (customer) {
-        await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken);
+        await firestoreRepo.saveCustomer(req.tenant!.id, customer, req.firebaseIdToken, req.firebaseUser);
       }
     }
 
@@ -1589,7 +1596,7 @@ api.get(
   requireRole(['owner', 'manager']),
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsLogs = await firestoreRepo.getAuditLogs(req.tenant!.id, req.firebaseIdToken);
+      const fsLogs = await firestoreRepo.getAuditLogs(req.tenant!.id, req.firebaseIdToken, req.firebaseUser);
       res.json(fsLogs);
       return;
     }

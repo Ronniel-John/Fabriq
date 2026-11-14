@@ -183,6 +183,13 @@
           "type": "string",
           "maxLength": 128
         },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
+        },
         "createdAt": {
           "type": "string",
           "maxLength": 64
@@ -228,6 +235,13 @@
         },
         "isActive": {
           "type": "boolean"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         },
         "createdAt": {
           "type": "string",
@@ -279,6 +293,13 @@
         },
         "isActive": {
           "type": "boolean"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         },
         "createdAt": {
           "type": "string",
@@ -341,6 +362,13 @@
         },
         "outstandingBalanceCentavos": {
           "type": "integer"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         },
         "createdAt": {
           "type": "string",
@@ -416,6 +444,13 @@
           "type": "string",
           "maxLength": 128
         },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
+        },
         "createdAt": {
           "type": "string",
           "maxLength": 64
@@ -464,6 +499,13 @@
         "notes": {
           "type": "string",
           "maxLength": 500
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         }
       },
       "required": ["id", "orderId", "serviceId", "serviceNameSnapshot", "pricingUnitSnapshot", "unitPriceCentavosSnapshot", "quantity", "subtotalCentavos"]
@@ -504,6 +546,13 @@
         "timestamp": {
           "type": "string",
           "maxLength": 64
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         }
       },
       "required": ["id", "orderId", "tenantId", "toStatus", "changedByUserId", "timestamp"]
@@ -547,6 +596,13 @@
         "createdAt": {
           "type": "string",
           "maxLength": 64
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         }
       },
       "required": ["id", "tenantId", "orderId", "amountCentavos", "method", "referenceNumber", "cashierUserId", "createdAt"]
@@ -643,6 +699,13 @@
         "createdAt": {
           "type": "string",
           "maxLength": 64
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "memberUids": {
+          "type": "array"
         }
       },
       "required": ["id", "action", "entityType", "createdAt"]

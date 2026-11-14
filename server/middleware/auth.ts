@@ -178,16 +178,44 @@ export async function requireTenant(
 
     if (req.firebaseIdToken) {
       membership = await firestoreRepo
-        .getMembershipForUid(tenant.id, req.user.authUid || req.user.id, req.firebaseIdToken)
+        .getMembershipForUid(tenant.id, req.firebaseUser?.uid || req.user.authUid || req.user.id, req.firebaseIdToken)
         .catch(() => null);
       if (!membership) {
-        const members = await firestoreRepo.getMembersByTenant(tenant.id, req.firebaseIdToken).catch(() => []);
+        const members = await firestoreRepo
+          .getMembersByTenant(tenant.id, req.firebaseIdToken, req.firebaseUser)
+          .catch(() => []);
         membership = members.find((m) => m.userId === req.user!.id || m.id === req.user!.id) || null;
       }
     }
 
     if (!membership) {
       membership = serverDb.findMembership(tenant.id, req.user.id);
+    }
+
+    if (
+      (!membership || membership.status !== 'active') &&
+      tenant.ownerEmail &&
+      req.firebaseUser?.email &&
+      tenant.ownerEmail.trim().toLowerCase() === req.firebaseUser.email.trim().toLowerCase()
+    ) {
+      const ownerUid = req.firebaseUser.uid;
+      const now = new Date().toISOString();
+      const ownerMembership: TenantMembership & { authUid?: string } = {
+        id: ownerUid,
+        tenantId: tenant.id,
+        userId: req.user.id,
+        authUid: ownerUid,
+        role: 'owner',
+        status: 'active',
+        createdAt: membership?.createdAt || now,
+        updatedAt: now,
+      };
+      if (req.firebaseIdToken) {
+        await firestoreRepo
+          .saveMembership(tenant.id, ownerMembership, req.firebaseIdToken, req.firebaseUser)
+          .catch(() => {});
+      }
+      membership = ownerMembership;
     }
 
     if (!membership || membership.status !== 'active') {
@@ -209,7 +237,7 @@ export async function requireTenant(
 
       serverDb.logAudit(auditPayload);
       if (req.firebaseIdToken) {
-        await firestoreRepo.logAudit(auditPayload, req.firebaseIdToken).catch(() => {});
+        await firestoreRepo.logAudit(auditPayload, req.firebaseIdToken, req.firebaseUser).catch(() => {});
       }
 
       res.status(403).json({

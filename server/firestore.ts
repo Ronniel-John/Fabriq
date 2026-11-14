@@ -368,6 +368,117 @@ export async function queryTenantsByOwnerEmail(email: string, idToken: string): 
   return tenants;
 }
 
+export async function runSubcollectionQuery<T>(
+  parentPath: string,
+  collectionId: string,
+  idToken: string,
+  whereField: string,
+  op: 'EQUAL' | 'ARRAY_CONTAINS',
+  value: FirestoreValue
+): Promise<Array<{ name: string; data: T }>> {
+  const { projectId, firestoreDatabaseId } = getFirebaseConfig();
+  const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${firestoreDatabaseId}/documents`;
+  const url = parentPath ? `${base}/${parentPath}:runQuery` : `${base}:runQuery`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: whereField },
+            op,
+            value,
+          },
+        },
+        limit: 500,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Firestore QUERY ${parentPath}/${collectionId} failed (${res.status}): ${errText}`);
+  }
+
+  const rows = (await res.json()) as Array<{
+    document?: { name?: string; fields?: Record<string, FirestoreValue> };
+  }>;
+  const results: Array<{ name: string; data: T }> = [];
+  for (const row of rows) {
+    if (row.document?.fields) {
+      results.push({
+        name: row.document.name || '',
+        data: fromFirestoreFields<T>(row.document.fields),
+      });
+    }
+  }
+  return results;
+}
+
+export async function listTenantSubcollection<T>(
+  parentPath: string,
+  collectionId: string,
+  idToken: string,
+  fbUser?: VerifiedFirebaseUser
+): Promise<T[]> {
+  if (!fbUser || fbUser.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
+    return listFirestoreCollection<T>(`${parentPath}/${collectionId}`, idToken);
+  }
+
+  const normalizedEmail = fbUser.email.trim().toLowerCase();
+  const queries: Array<Promise<Array<{ name: string; data: T }>>> = [
+    runSubcollectionQuery<T>(parentPath, collectionId, idToken, 'memberUids', 'ARRAY_CONTAINS', {
+      stringValue: fbUser.uid,
+    }).catch((err) => {
+      console.warn(
+        `runSubcollectionQuery(memberUids) ${parentPath}/${collectionId} failed:`,
+        err instanceof Error ? err.message : err
+      );
+      return [];
+    }),
+  ];
+
+  if (normalizedEmail) {
+    queries.push(
+      runSubcollectionQuery<T>(parentPath, collectionId, idToken, 'ownerEmail', 'EQUAL', {
+        stringValue: normalizedEmail,
+      }).catch((err) => {
+        console.warn(
+          `runSubcollectionQuery(ownerEmail) ${parentPath}/${collectionId} failed:`,
+          err instanceof Error ? err.message : err
+        );
+        return [];
+      })
+    );
+  }
+
+  if (collectionId === 'members') {
+    queries.push(
+      runSubcollectionQuery<T>(parentPath, collectionId, idToken, 'userId', 'EQUAL', {
+        stringValue: fbUser.uid,
+      }).catch(() => [])
+    );
+  }
+
+  const batches = await Promise.all(queries);
+  const byDocName = new Map<string, T>();
+  let fallbackIdx = 0;
+  for (const batch of batches) {
+    for (const item of batch) {
+      const idFromData = (item.data as { id?: string })?.id;
+      const key = item.name || idFromData || `row-${fallbackIdx++}`;
+      byDocName.set(key, item.data);
+    }
+  }
+  return Array.from(byDocName.values());
+}
+
 export async function queryAllTenants(idToken: string): Promise<Tenant[]> {
   const { projectId, firestoreDatabaseId } = getFirebaseConfig();
   const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${firestoreDatabaseId}/documents:runQuery`;
@@ -409,6 +520,159 @@ export const BOOTSTRAPPED_ADMIN_EMAIL = 'fabricantepriscia@gmail.com';
 
 class FirestoreRepository {
   private seededInSession = false;
+  private tenantMetaCache = new Map<
+    string,
+    { ownerEmail?: string; memberUids: string[]; expiresAt: number }
+  >();
+
+  private async getTenantAccessMeta(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<{ ownerEmail?: string; memberUids: string[] }> {
+    const cached = this.tenantMetaCache.get(tenantId);
+    let ownerEmail: string | undefined;
+    let memberUids: string[] = [];
+
+    if (cached && cached.expiresAt > Date.now()) {
+      ownerEmail = cached.ownerEmail;
+      memberUids = [...cached.memberUids];
+    } else {
+      const tenantDoc = await getFirestoreDoc<Tenant & { memberUids?: string[] }>(
+        `tenants/${tenantId}`,
+        idToken
+      ).catch(() => null);
+      ownerEmail =
+        tenantDoc?.ownerEmail && typeof tenantDoc.ownerEmail === 'string'
+          ? tenantDoc.ownerEmail.trim().toLowerCase()
+          : undefined;
+      memberUids = Array.isArray(tenantDoc?.memberUids) ? [...tenantDoc.memberUids] : [];
+      this.tenantMetaCache.set(tenantId, {
+        ownerEmail,
+        memberUids,
+        expiresAt: Date.now() + 15_000,
+      });
+    }
+
+    if (fbUser?.uid && !memberUids.includes(fbUser.uid)) {
+      memberUids.push(fbUser.uid);
+    }
+
+    return {
+      ownerEmail,
+      memberUids: memberUids.slice(0, 50),
+    };
+  }
+
+  private async attachTenantAccessMeta<T extends Record<string, unknown>>(
+    tenantId: string,
+    doc: T,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<T> {
+    const meta = await this.getTenantAccessMeta(tenantId, idToken, fbUser);
+    const existingUids = Array.isArray((doc as { memberUids?: unknown }).memberUids)
+      ? ((doc as { memberUids?: string[] }).memberUids || [])
+      : [];
+    const mergedUids = Array.from(new Set([...meta.memberUids, ...existingUids])).slice(0, 50);
+    const resolvedOwnerEmail =
+      (doc as { ownerEmail?: string | null }).ownerEmail || meta.ownerEmail || undefined;
+
+    return {
+      ...doc,
+      ...(resolvedOwnerEmail ? { ownerEmail: String(resolvedOwnerEmail).trim().toLowerCase().slice(0, 255) } : {}),
+      ...(mergedUids.length > 0 ? { memberUids: mergedUids } : {}),
+    };
+  }
+
+  private isSuperAdminUser(fbUser?: VerifiedFirebaseUser): boolean {
+    return !fbUser || fbUser.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+  }
+
+  private scheduleLegacyBackfill(
+    tenantId: string,
+    collectionPath: string,
+    docs: Array<Record<string, unknown> & { id: string }>,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): void {
+    if (!this.isSuperAdminUser(fbUser) || docs.length === 0) return;
+    void (async () => {
+      try {
+        const meta = await this.getTenantAccessMeta(tenantId, idToken, fbUser);
+        if (!meta.ownerEmail && meta.memberUids.length === 0) return;
+
+        for (const d of docs) {
+          const docUids = Array.isArray(d.memberUids) ? (d.memberUids as string[]) : [];
+          const docOwner = typeof d.ownerEmail === 'string' ? d.ownerEmail.trim().toLowerCase() : undefined;
+          const missingUid = meta.memberUids.some((u) => !docUids.includes(u));
+          const missingOwner = Boolean(meta.ownerEmail && docOwner !== meta.ownerEmail);
+          if (missingUid || missingOwner) {
+            const mergedUids = Array.from(new Set([...docUids, ...meta.memberUids])).slice(0, 50);
+            const patched = {
+              ...d,
+              ...(meta.ownerEmail ? { ownerEmail: meta.ownerEmail } : {}),
+              ...(mergedUids.length > 0 ? { memberUids: mergedUids } : {}),
+            };
+            await setFirestoreDoc(`${collectionPath}/${d.id}`, patched, idToken).catch(() => {});
+          }
+        }
+      } catch {
+        // Non-blocking background backfill
+      }
+    })();
+  }
+
+  public async syncTenantSubcollectionMeta(
+    tenantId: string,
+    ownerEmail: string | null | undefined,
+    memberUids: string[],
+    idToken: string
+  ): Promise<void> {
+    this.tenantMetaCache.delete(tenantId);
+    const normalizedEmail = ownerEmail ? ownerEmail.trim().toLowerCase() : null;
+    const collections = ['members', 'branches', 'services', 'customers', 'orders', 'payments', 'audit_logs'];
+
+    await Promise.all(
+      collections.map(async (col) => {
+        const docs = await listFirestoreCollection<Record<string, unknown> & { id: string }>(
+          `tenants/${tenantId}/${col}`,
+          idToken
+        ).catch(() => []);
+        await Promise.all(
+          docs.map(async (d) => {
+            const existingUids = Array.isArray(d.memberUids) ? (d.memberUids as string[]) : [];
+            const mergedUids = Array.from(new Set([...existingUids, ...memberUids])).slice(0, 50);
+            const patched: Record<string, unknown> = {
+              ...d,
+              ownerEmail: normalizedEmail,
+              ...(mergedUids.length > 0 ? { memberUids: mergedUids } : {}),
+            };
+            await setFirestoreDoc(`tenants/${tenantId}/${col}/${d.id}`, patched, idToken).catch(() => {});
+            if (col === 'orders') {
+              const items = await listFirestoreCollection<Record<string, unknown> & { id: string }>(
+                `tenants/${tenantId}/orders/${d.id}/items`,
+                idToken
+              ).catch(() => []);
+              await Promise.all(
+                items.map((item) =>
+                  setFirestoreDoc(
+                    `tenants/${tenantId}/orders/${d.id}/items/${item.id}`,
+                    {
+                      ...item,
+                      ownerEmail: normalizedEmail,
+                      ...(mergedUids.length > 0 ? { memberUids: mergedUids } : {}),
+                    },
+                    idToken
+                  ).catch(() => {})
+                )
+              );
+            }
+          })
+        );
+      })
+    );
+  }
 
   /**
    * Ensures the authenticated Firebase user has a profile, membership,
@@ -509,8 +773,11 @@ class FirestoreRepository {
         if (isAssignedOwner || isAdminEmail) {
           let activeMember = existingMember;
           if (!existingMember || existingMember.status !== 'active' || existingMember.role !== 'owner') {
-            const branches = isAdminEmail ? await this.getBranchesByTenant(t.id, idToken).catch(() => []) : [];
-            const newMem: TenantMembership & { authUid: string } = {
+            const branches = isAdminEmail ? await this.getBranchesByTenant(t.id, idToken, fbUser).catch(() => []) : [];
+            const tenantWithMeta = t as Tenant & { memberUids?: string[]; ownerUid?: string };
+            const currentTenantUids = Array.isArray(tenantWithMeta.memberUids) ? tenantWithMeta.memberUids : [];
+            const mergedMemberUids = Array.from(new Set([...currentTenantUids, fbUser.uid])).slice(0, 50);
+            const newMem: TenantMembership & { authUid: string; ownerEmail?: string; memberUids?: string[] } = {
               id: fbUser.uid,
               tenantId: t.id,
               userId: fsUser.id,
@@ -518,6 +785,8 @@ class FirestoreRepository {
               role: 'owner',
               status: 'active',
               branchId: existingMember?.branchId || branches[0]?.id,
+              ...(t.ownerEmail ? { ownerEmail: t.ownerEmail.trim().toLowerCase() } : {}),
+              memberUids: mergedMemberUids,
               createdAt: existingMember?.createdAt || now,
               updatedAt: now,
             };
@@ -547,6 +816,7 @@ class FirestoreRepository {
               updatedAt: now,
             };
             await setFirestoreDoc(`tenants/${t.id}`, updatedTenantDoc, idToken).catch(() => {});
+            this.tenantMetaCache.delete(t.id);
             Object.assign(t, updatedTenantDoc);
           }
         } else if (existingMember && existingMember.status === 'active') {
@@ -602,12 +872,25 @@ class FirestoreRepository {
     tenant: Tenant & { ownerUid?: string; memberUids?: string[] },
     idToken: string
   ): Promise<Tenant> {
+    this.tenantMetaCache.delete(tenant.id);
     return setFirestoreDoc<Tenant>(`tenants/${tenant.id}`, tenant, idToken);
   }
 
   // --- MEMBERSHIPS ---
-  public async getMembersByTenant(tenantId: string, idToken: string): Promise<TenantMembership[]> {
-    return listFirestoreCollection<TenantMembership>(`tenants/${tenantId}/members`, idToken);
+  public async getMembersByTenant(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<TenantMembership[]> {
+    const members = await listTenantSubcollection<TenantMembership>(`tenants/${tenantId}`, 'members', idToken, fbUser);
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/members`,
+      members as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
+    return members;
   }
 
   public async getMembershipForUid(
@@ -621,59 +904,160 @@ class FirestoreRepository {
   public async saveMembership(
     tenantId: string,
     membership: TenantMembership & { authUid?: string },
-    idToken: string
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
   ): Promise<TenantMembership> {
-    return setFirestoreDoc<TenantMembership>(`tenants/${tenantId}/members/${membership.id}`, membership, idToken);
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      membership as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<TenantMembership>(`tenants/${tenantId}/members/${membership.id}`, payload as unknown as TenantMembership, idToken);
   }
 
   // --- BRANCHES ---
-  public async getBranchesByTenant(tenantId: string, idToken: string): Promise<Branch[]> {
-    return listFirestoreCollection<Branch>(`tenants/${tenantId}/branches`, idToken);
+  public async getBranchesByTenant(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Branch[]> {
+    const branches = await listTenantSubcollection<Branch>(`tenants/${tenantId}`, 'branches', idToken, fbUser);
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/branches`,
+      branches as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
+    return branches;
   }
 
-  public async saveBranch(tenantId: string, branch: Branch, idToken: string): Promise<Branch> {
-    return setFirestoreDoc<Branch>(`tenants/${tenantId}/branches/${branch.id}`, branch, idToken);
+  public async saveBranch(
+    tenantId: string,
+    branch: Branch,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Branch> {
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      branch as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<Branch>(`tenants/${tenantId}/branches/${branch.id}`, payload as unknown as Branch, idToken);
   }
 
   // --- SERVICES ---
-  public async getServicesByTenant(tenantId: string, idToken: string): Promise<Service[]> {
-    return listFirestoreCollection<Service>(`tenants/${tenantId}/services`, idToken);
+  public async getServicesByTenant(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Service[]> {
+    const services = await listTenantSubcollection<Service>(`tenants/${tenantId}`, 'services', idToken, fbUser);
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/services`,
+      services as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
+    return services;
   }
 
-  public async saveService(tenantId: string, service: Service, idToken: string): Promise<Service> {
-    return setFirestoreDoc<Service>(`tenants/${tenantId}/services/${service.id}`, service, idToken);
+  public async saveService(
+    tenantId: string,
+    service: Service,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Service> {
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      service as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<Service>(`tenants/${tenantId}/services/${service.id}`, payload as unknown as Service, idToken);
   }
 
   // --- CUSTOMERS ---
-  public async getCustomersByTenant(tenantId: string, idToken: string): Promise<Customer[]> {
-    return listFirestoreCollection<Customer>(`tenants/${tenantId}/customers`, idToken);
+  public async getCustomersByTenant(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Customer[]> {
+    const customers = await listTenantSubcollection<Customer>(`tenants/${tenantId}`, 'customers', idToken, fbUser);
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/customers`,
+      customers as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
+    return customers;
   }
 
   public async getCustomerById(tenantId: string, customerId: string, idToken: string): Promise<Customer | null> {
     return getFirestoreDoc<Customer>(`tenants/${tenantId}/customers/${customerId}`, idToken);
   }
 
-  public async saveCustomer(tenantId: string, customer: Customer, idToken: string): Promise<Customer> {
-    return setFirestoreDoc<Customer>(`tenants/${tenantId}/customers/${customer.id}`, customer, idToken);
+  public async saveCustomer(
+    tenantId: string,
+    customer: Customer,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Customer> {
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      customer as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<Customer>(`tenants/${tenantId}/customers/${customer.id}`, payload as unknown as Customer, idToken);
   }
 
   // --- ORDERS ---
   public async getOrdersByTenant(
     tenantId: string,
-    idToken: string
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
   ): Promise<Array<Order & { items: OrderItem[]; customer?: Customer }>> {
     const [orders, customers] = await Promise.all([
-      listFirestoreCollection<Order>(`tenants/${tenantId}/orders`, idToken),
-      listFirestoreCollection<Customer>(`tenants/${tenantId}/customers`, idToken),
+      listTenantSubcollection<Order>(`tenants/${tenantId}`, 'orders', idToken, fbUser),
+      listTenantSubcollection<Customer>(`tenants/${tenantId}`, 'customers', idToken, fbUser),
     ]);
+
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/orders`,
+      orders as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/customers`,
+      customers as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
 
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
     const enriched = await Promise.all(
       orders.map(async (order) => {
-        const items = await listFirestoreCollection<OrderItem>(
+        const items = await listTenantSubcollection<OrderItem>(
+          `tenants/${tenantId}/orders/${order.id}`,
+          'items',
+          idToken,
+          fbUser
+        ).catch(() => []);
+        this.scheduleLegacyBackfill(
+          tenantId,
           `tenants/${tenantId}/orders/${order.id}/items`,
-          idToken
+          items as unknown as Array<Record<string, unknown> & { id: string }>,
+          idToken,
+          fbUser
         );
         return {
           ...order,
@@ -689,14 +1073,15 @@ class FirestoreRepository {
   public async getOrderById(
     tenantId: string,
     orderId: string,
-    idToken: string
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
   ): Promise<(Order & { items: OrderItem[]; customer?: Customer; history: OrderStatusHistory[] }) | null> {
     const order = await getFirestoreDoc<Order>(`tenants/${tenantId}/orders/${orderId}`, idToken);
     if (!order) return null;
 
     const [items, history, customer] = await Promise.all([
-      listFirestoreCollection<OrderItem>(`tenants/${tenantId}/orders/${orderId}/items`, idToken),
-      listFirestoreCollection<OrderStatusHistory>(`tenants/${tenantId}/orders/${orderId}/history`, idToken),
+      listTenantSubcollection<OrderItem>(`tenants/${tenantId}/orders/${orderId}`, 'items', idToken, fbUser),
+      listTenantSubcollection<OrderStatusHistory>(`tenants/${tenantId}/orders/${orderId}`, 'history', idToken, fbUser),
       getFirestoreDoc<Customer>(`tenants/${tenantId}/customers/${order.customerId}`, idToken),
     ]);
 
@@ -708,41 +1093,93 @@ class FirestoreRepository {
     };
   }
 
-  public async saveOrder(tenantId: string, order: Order, idToken: string): Promise<Order> {
+  public async saveOrder(
+    tenantId: string,
+    order: Order,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Order> {
     // Strip virtual relations before saving to Firestore so strict rules allowlists pass
     const { items: _items, customer: _customer, history: _history, ...cleanOrder } = order as Order & {
       items?: unknown;
       customer?: unknown;
       history?: unknown;
     };
-    return setFirestoreDoc<Order>(`tenants/${tenantId}/orders/${order.id}`, cleanOrder as Order, idToken);
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      cleanOrder as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<Order>(`tenants/${tenantId}/orders/${order.id}`, payload as unknown as Order, idToken);
   }
 
-  public async saveOrderItem(tenantId: string, orderId: string, item: OrderItem, idToken: string): Promise<OrderItem> {
-    return setFirestoreDoc<OrderItem>(`tenants/${tenantId}/orders/${orderId}/items/${item.id}`, item, idToken);
+  public async saveOrderItem(
+    tenantId: string,
+    orderId: string,
+    item: OrderItem,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<OrderItem> {
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      item as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<OrderItem>(`tenants/${tenantId}/orders/${orderId}/items/${item.id}`, payload as unknown as OrderItem, idToken);
   }
 
   public async saveOrderHistory(
     tenantId: string,
     orderId: string,
     entry: OrderStatusHistory,
-    idToken: string
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
   ): Promise<OrderStatusHistory> {
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      entry as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
     return setFirestoreDoc<OrderStatusHistory>(
       `tenants/${tenantId}/orders/${orderId}/history/${entry.id}`,
-      entry,
+      payload as unknown as OrderStatusHistory,
       idToken
     );
   }
 
   // --- PAYMENTS ---
-  public async getPaymentsByTenant(tenantId: string, idToken: string): Promise<Payment[]> {
-    const payments = await listFirestoreCollection<Payment>(`tenants/${tenantId}/payments`, idToken);
+  public async getPaymentsByTenant(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Payment[]> {
+    const payments = await listTenantSubcollection<Payment>(`tenants/${tenantId}`, 'payments', idToken, fbUser);
+    this.scheduleLegacyBackfill(
+      tenantId,
+      `tenants/${tenantId}/payments`,
+      payments as unknown as Array<Record<string, unknown> & { id: string }>,
+      idToken,
+      fbUser
+    );
     return payments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  public async savePayment(tenantId: string, payment: Payment, idToken: string): Promise<Payment> {
-    return setFirestoreDoc<Payment>(`tenants/${tenantId}/payments/${payment.id}`, payment, idToken);
+  public async savePayment(
+    tenantId: string,
+    payment: Payment,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<Payment> {
+    const payload = await this.attachTenantAccessMeta(
+      tenantId,
+      payment as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<Payment>(`tenants/${tenantId}/payments/${payment.id}`, payload as unknown as Payment, idToken);
   }
 
   // --- SUBSCRIPTIONS ---
@@ -759,22 +1196,30 @@ class FirestoreRepository {
   }
 
   // --- AUDIT LOGS ---
-  public async getAuditLogs(tenantId: string, idToken: string): Promise<AuditLog[]> {
-    const logs = await listFirestoreCollection<AuditLog>(`tenants/${tenantId}/audit_logs`, idToken);
+  public async getAuditLogs(
+    tenantId: string,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<AuditLog[]> {
+    const logs = await listTenantSubcollection<AuditLog>(`tenants/${tenantId}`, 'audit_logs', idToken, fbUser);
     return logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   public async getAllAdminAuditLogs(idToken: string, fbUser?: VerifiedFirebaseUser): Promise<AuditLog[]> {
     const tenants = await this.getTenants(idToken, fbUser);
     const logsPerTenant = await Promise.all(
-      tenants.map((t) => listFirestoreCollection<AuditLog>(`tenants/${t.id}/audit_logs`, idToken).catch(() => []))
+      tenants.map((t) => listTenantSubcollection<AuditLog>(`tenants/${t.id}`, 'audit_logs', idToken, fbUser).catch(() => []))
     );
     return logsPerTenant
       .flat()
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  public async logAudit(log: Omit<AuditLog, 'id' | 'createdAt'>, idToken: string): Promise<AuditLog | null> {
+  public async logAudit(
+    log: Omit<AuditLog, 'id' | 'createdAt'>,
+    idToken: string,
+    fbUser?: VerifiedFirebaseUser
+  ): Promise<AuditLog | null> {
     if (!log.tenantId) return null;
     const newLog: AuditLog = {
       ...log,
@@ -786,7 +1231,13 @@ class FirestoreRepository {
       id: `log-${crypto.randomUUID()}`,
       createdAt: new Date().toISOString(),
     };
-    return setFirestoreDoc<AuditLog>(`tenants/${log.tenantId}/audit_logs/${newLog.id}`, newLog, idToken);
+    const payload = await this.attachTenantAccessMeta(
+      log.tenantId,
+      newLog as unknown as Record<string, unknown>,
+      idToken,
+      fbUser
+    );
+    return setFirestoreDoc<AuditLog>(`tenants/${log.tenantId}/audit_logs/${newLog.id}`, payload as unknown as AuditLog, idToken);
   }
 }
 

@@ -52,8 +52,15 @@ service cloud.firestore {
     function isAssignedTenantOwner(tenantId) {
       return isVerified()
         && ('email' in request.auth.token)
+        && exists(/databases/$(database)/documents/tenants/$(tenantId))
         && ('ownerEmail' in get(/databases/$(database)/documents/tenants/$(tenantId)).data)
+        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerEmail is string
         && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerEmail.lower() == request.auth.token.email.lower();
+    }
+
+    function hasValidTenantAccessMeta(data) {
+      return (!('ownerEmail' in data) || data.ownerEmail == null || (data.ownerEmail is string && data.ownerEmail.size() <= 255))
+        && (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50 && (data.memberUids.size() == 0 || data.memberUids[0] is string)));
     }
 
     // 3. Entity Validation Blueprints
@@ -106,7 +113,7 @@ service cloud.firestore {
 
     function isValidMembership(data) {
       return data.keys().hasAll(['id', 'tenantId', 'userId', 'role', 'status'])
-        && data.keys().hasOnly(['id', 'tenantId', 'userId', 'authUid', 'role', 'status', 'branchId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'userId', 'authUid', 'role', 'status', 'branchId', 'ownerEmail', 'memberUids', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.tenantId)
         && isValidId(data.userId)
@@ -115,12 +122,13 @@ service cloud.firestore {
         && (!('authUid' in data) || (data.authUid is string && data.authUid.size() <= 128))
         && (!('branchId' in data) || data.branchId == null || (data.branchId is string && data.branchId.size() <= 128))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
-        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidBranch(data) {
       return data.keys().hasAll(['id', 'tenantId', 'name', 'code'])
-        && data.keys().hasOnly(['id', 'tenantId', 'name', 'code', 'address', 'phone', 'isMain', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'name', 'code', 'address', 'phone', 'isMain', 'isActive', 'ownerEmail', 'memberUids', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.tenantId)
         && data.name is string && data.name.size() > 0 && data.name.size() <= 255
@@ -128,12 +136,13 @@ service cloud.firestore {
         && (!('address' in data) || (data.address is string && data.address.size() <= 500))
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 64))
         && (!('isMain' in data) || data.isMain is bool)
-        && (!('isActive' in data) || data.isActive is bool);
+        && (!('isActive' in data) || data.isActive is bool)
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidService(data) {
       return data.keys().hasAll(['id', 'tenantId', 'name', 'pricingUnit', 'unitPriceCentavos'])
-        && data.keys().hasOnly(['id', 'tenantId', 'name', 'category', 'pricingUnit', 'unitPriceCentavos', 'minChargeCentavos', 'minQuantity', 'defaultTurnaroundHours', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'name', 'category', 'pricingUnit', 'unitPriceCentavos', 'minChargeCentavos', 'minQuantity', 'defaultTurnaroundHours', 'isActive', 'ownerEmail', 'memberUids', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.tenantId)
         && data.name is string && data.name.size() > 0 && data.name.size() <= 255
@@ -143,12 +152,13 @@ service cloud.firestore {
         && (!('minChargeCentavos' in data) || (data.minChargeCentavos is int && data.minChargeCentavos >= 0))
         && (!('minQuantity' in data) || data.minQuantity is number)
         && (!('defaultTurnaroundHours' in data) || data.defaultTurnaroundHours is int)
-        && (!('isActive' in data) || data.isActive is bool);
+        && (!('isActive' in data) || data.isActive is bool)
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidCustomer(data) {
       return data.keys().hasAll(['id', 'tenantId', 'branchId', 'name', 'mobile'])
-        && data.keys().hasOnly(['id', 'tenantId', 'branchId', 'name', 'mobile', 'email', 'address', 'customerType', 'washPreferences', 'notes', 'totalOrders', 'outstandingBalanceCentavos', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'branchId', 'name', 'mobile', 'email', 'address', 'customerType', 'washPreferences', 'notes', 'totalOrders', 'outstandingBalanceCentavos', 'ownerEmail', 'memberUids', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.tenantId)
         && isValidId(data.branchId)
@@ -162,12 +172,13 @@ service cloud.firestore {
         && (!('totalOrders' in data) || (data.totalOrders is int && data.totalOrders >= 0))
         && (!('outstandingBalanceCentavos' in data) || (data.outstandingBalanceCentavos is int && data.outstandingBalanceCentavos >= 0))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
-        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidOrder(data) {
       return data.keys().hasAll(['id', 'tenantId', 'branchId', 'customerId', 'orderNumber', 'status', 'paymentStatus', 'totalCentavos'])
-        && data.keys().hasOnly(['id', 'tenantId', 'branchId', 'customerId', 'orderNumber', 'status', 'paymentStatus', 'subtotalCentavos', 'discountCentavos', 'expressFeeCentavos', 'totalCentavos', 'paidCentavos', 'balanceCentavos', 'notes', 'expectedReadyAt', 'createdByUserId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'branchId', 'customerId', 'orderNumber', 'status', 'paymentStatus', 'subtotalCentavos', 'discountCentavos', 'expressFeeCentavos', 'totalCentavos', 'paidCentavos', 'balanceCentavos', 'notes', 'expectedReadyAt', 'createdByUserId', 'ownerEmail', 'memberUids', 'createdAt', 'updatedAt'])
         && isValidId(data.id)
         && isValidId(data.tenantId)
         && isValidId(data.branchId)
@@ -181,12 +192,13 @@ service cloud.firestore {
         && (!('expressFeeCentavos' in data) || (data.expressFeeCentavos is int && data.expressFeeCentavos >= 0))
         && (!('paidCentavos' in data) || (data.paidCentavos is int && data.paidCentavos >= 0))
         && (!('balanceCentavos' in data) || (data.balanceCentavos is int && data.balanceCentavos >= 0))
-        && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 1000));
+        && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 1000))
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidOrderItem(data) {
       return data.keys().hasAll(['id', 'orderId', 'serviceId', 'serviceNameSnapshot', 'pricingUnitSnapshot', 'unitPriceCentavosSnapshot', 'quantity', 'subtotalCentavos'])
-        && data.keys().hasOnly(['id', 'orderId', 'serviceId', 'serviceNameSnapshot', 'pricingUnitSnapshot', 'unitPriceCentavosSnapshot', 'quantity', 'subtotalCentavos', 'notes'])
+        && data.keys().hasOnly(['id', 'orderId', 'serviceId', 'serviceNameSnapshot', 'pricingUnitSnapshot', 'unitPriceCentavosSnapshot', 'quantity', 'subtotalCentavos', 'notes', 'ownerEmail', 'memberUids'])
         && isValidId(data.id)
         && isValidId(data.orderId)
         && isValidId(data.serviceId)
@@ -195,12 +207,13 @@ service cloud.firestore {
         && data.unitPriceCentavosSnapshot is int && data.unitPriceCentavosSnapshot >= 0
         && data.quantity is number && data.quantity > 0
         && data.subtotalCentavos is int && data.subtotalCentavos >= 0
-        && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500));
+        && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500))
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidOrderHistory(data) {
       return data.keys().hasAll(['id', 'orderId', 'tenantId', 'toStatus', 'changedByUserId', 'timestamp'])
-        && data.keys().hasOnly(['id', 'orderId', 'tenantId', 'fromStatus', 'toStatus', 'changedByUserId', 'notes', 'timestamp'])
+        && data.keys().hasOnly(['id', 'orderId', 'tenantId', 'fromStatus', 'toStatus', 'changedByUserId', 'notes', 'timestamp', 'ownerEmail', 'memberUids'])
         && isValidId(data.id)
         && isValidId(data.orderId)
         && isValidId(data.tenantId)
@@ -208,12 +221,13 @@ service cloud.firestore {
         && data.toStatus is string && data.toStatus.size() <= 64
         && data.changedByUserId is string && data.changedByUserId.size() <= 128
         && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500))
-        && data.timestamp is string && data.timestamp.size() <= 64;
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidPayment(data) {
       return data.keys().hasAll(['id', 'tenantId', 'orderId', 'amountCentavos', 'method', 'referenceNumber', 'cashierUserId', 'createdAt'])
-        && data.keys().hasOnly(['id', 'tenantId', 'orderId', 'amountCentavos', 'method', 'referenceNumber', 'cashierUserId', 'notes', 'createdAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'orderId', 'amountCentavos', 'method', 'referenceNumber', 'cashierUserId', 'notes', 'ownerEmail', 'memberUids', 'createdAt'])
         && isValidId(data.id)
         && isValidId(data.tenantId)
         && isValidId(data.orderId)
@@ -222,12 +236,13 @@ service cloud.firestore {
         && data.referenceNumber is string && data.referenceNumber.size() <= 128
         && data.cashierUserId is string && data.cashierUserId.size() <= 128
         && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500))
-        && data.createdAt is string && data.createdAt.size() <= 64;
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidAuditLog(data) {
       return data.keys().hasAll(['id', 'action', 'entityType', 'createdAt'])
-        && data.keys().hasOnly(['id', 'tenantId', 'userId', 'action', 'entityType', 'entityId', 'metadata', 'ipAddress', 'userAgent', 'createdAt'])
+        && data.keys().hasOnly(['id', 'tenantId', 'userId', 'action', 'entityType', 'entityId', 'metadata', 'ipAddress', 'userAgent', 'ownerEmail', 'memberUids', 'createdAt'])
         && isValidId(data.id)
         && (!('tenantId' in data) || data.tenantId == null || isValidId(data.tenantId))
         && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128))
@@ -237,7 +252,8 @@ service cloud.firestore {
         && (!('metadata' in data) || data.metadata == null || data.metadata is map)
         && (!('ipAddress' in data) || data.ipAddress == null || (data.ipAddress is string && data.ipAddress.size() <= 64))
         && (!('userAgent' in data) || data.userAgent == null || (data.userAgent is string && data.userAgent.size() <= 512))
-        && data.createdAt is string && data.createdAt.size() <= 64;
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && hasValidTenantAccessMeta(data);
     }
 
     function isValidSubscription(data) {
@@ -310,9 +326,11 @@ service cloud.firestore {
       allow delete: if false;
 
       match /members/{memberId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(memberId) && (isAdmin() || request.auth.uid == memberId || isTenantMember(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && isTenantMember(tenantId);
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(memberId) && (isAdmin() || request.auth.uid == memberId || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && resource.data.userId == request.auth.uid;
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
         allow create: if isVerified() && isValidId(tenantId) && isValidId(memberId) && isValidMembership(incoming()) && incoming().tenantId == tenantId && (
           isAdmin()
           || (memberId == request.auth.uid && incoming().role == 'owner' && isAssignedTenantOwner(tenantId))
@@ -321,85 +339,93 @@ service cloud.firestore {
         allow update: if isVerified() && isValidId(tenantId) && isValidId(memberId) && isValidMembership(incoming()) && incoming().tenantId == existing().tenantId && (
           isAdmin()
           || (memberId == request.auth.uid && incoming().role == 'owner' && isAssignedTenantOwner(tenantId))
-          || (isTenantManagerOrOwner(tenantId) && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'branchId', 'updatedAt']))
+          || (isTenantManagerOrOwner(tenantId) && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'branchId', 'ownerEmail', 'memberUids', 'updatedAt']))
         );
         allow delete: if isAdmin();
       }
 
       match /branches/{branchId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(branchId) && (isAdmin() || isTenantMember(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && (isAdmin() || isTenantMember(tenantId));
-        allow create, update: if isVerified() && isValidId(tenantId) && isValidId(branchId) && isValidBranch(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantManagerOrOwner(tenantId));
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(branchId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+        allow create, update: if isVerified() && isValidId(tenantId) && isValidId(branchId) && isValidBranch(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantManagerOrOwner(tenantId) || isAssignedTenantOwner(tenantId));
         allow delete: if false;
       }
 
       match /services/{serviceId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(serviceId) && (isAdmin() || isTenantMember(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && (isAdmin() || isTenantMember(tenantId));
-        allow create, update: if isVerified() && isValidId(tenantId) && isValidId(serviceId) && isValidService(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantManagerOrOwner(tenantId));
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(serviceId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+        allow create, update: if isVerified() && isValidId(tenantId) && isValidId(serviceId) && isValidService(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantManagerOrOwner(tenantId) || isAssignedTenantOwner(tenantId));
         allow delete: if isAdmin();
       }
 
       match /customers/{customerId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(customerId) && (isAdmin() || isTenantMember(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && (isAdmin() || isTenantMember(tenantId));
-        allow create: if isVerified() && isValidId(tenantId) && isValidId(customerId) && isValidCustomer(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId));
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(customerId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+        allow create: if isVerified() && isValidId(tenantId) && isValidId(customerId) && isValidCustomer(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
         allow update: if isVerified() && isValidId(tenantId) && isValidId(customerId) && isValidCustomer(incoming()) && incoming().tenantId == existing().tenantId && (
-          isAdmin() || (isTenantMember(tenantId) && incoming().diff(existing()).affectedKeys().hasOnly(['branchId', 'name', 'mobile', 'email', 'address', 'customerType', 'washPreferences', 'notes', 'totalOrders', 'outstandingBalanceCentavos', 'updatedAt']))
+          isAdmin() || ((isTenantMember(tenantId) || isAssignedTenantOwner(tenantId)) && incoming().diff(existing()).affectedKeys().hasOnly(['branchId', 'name', 'mobile', 'email', 'address', 'customerType', 'washPreferences', 'notes', 'totalOrders', 'outstandingBalanceCentavos', 'ownerEmail', 'memberUids', 'updatedAt']))
         );
         allow delete: if false;
       }
 
       match /orders/{orderId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(orderId) && (isAdmin() || isTenantMember(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && (isAdmin() || isTenantMember(tenantId));
-        allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidOrder(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId));
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(orderId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+        allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidOrder(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
         allow update: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidOrder(incoming()) && incoming().tenantId == existing().tenantId && (
           isAdmin() || (
             existing().status != 'cancelled'
-            && isTenantMember(tenantId)
+            && (isTenantMember(tenantId) || isAssignedTenantOwner(tenantId))
             && (
-              (existing().status != 'released' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paidCentavos', 'balanceCentavos', 'notes', 'updatedAt']))
-              || (existing().status == 'released' && incoming().status == 'released' && incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'paidCentavos', 'balanceCentavos', 'updatedAt']))
+              (existing().status != 'released' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paidCentavos', 'balanceCentavos', 'notes', 'ownerEmail', 'memberUids', 'updatedAt']))
+              || (existing().status == 'released' && incoming().status == 'released' && incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'paidCentavos', 'balanceCentavos', 'ownerEmail', 'memberUids', 'updatedAt']))
             )
           )
         );
         allow delete: if false;
 
         match /items/{itemId} {
-          allow get: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(itemId) && (isAdmin() || isTenantMember(tenantId));
-          allow list: if isBootstrappedAdmin() && isValidId(tenantId) && isValidId(orderId);
-          allow list: if isVerified() && isValidId(tenantId) && isValidId(orderId) && (isAdmin() || isTenantMember(tenantId));
-          allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(itemId) && isValidOrderItem(incoming()) && incoming().orderId == orderId && (isAdmin() || isTenantMember(tenantId));
+          allow get: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(itemId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+          allow list: if isBootstrappedAdmin();
+          allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+          allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+          allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(itemId) && isValidOrderItem(incoming()) && incoming().orderId == orderId && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
           allow update, delete: if false;
         }
 
         match /history/{historyId} {
-          allow get: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(historyId) && (isAdmin() || isTenantMember(tenantId));
-          allow list: if isBootstrappedAdmin() && isValidId(tenantId) && isValidId(orderId);
-          allow list: if isVerified() && isValidId(tenantId) && isValidId(orderId) && (isAdmin() || isTenantMember(tenantId));
-          allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(historyId) && isValidOrderHistory(incoming()) && incoming().orderId == orderId && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId));
+          allow get: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(historyId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+          allow list: if isBootstrappedAdmin();
+          allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+          allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+          allow create: if isVerified() && isValidId(tenantId) && isValidId(orderId) && isValidId(historyId) && isValidOrderHistory(incoming()) && incoming().orderId == orderId && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
           allow update, delete: if false;
         }
       }
 
       match /payments/{paymentId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(paymentId) && (isAdmin() || isTenantMember(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && (isAdmin() || isTenantMember(tenantId));
-        allow create: if isVerified() && isValidId(tenantId) && isValidId(paymentId) && isValidPayment(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId));
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(paymentId) && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+        allow create: if isVerified() && isValidId(tenantId) && isValidId(paymentId) && isValidPayment(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
         allow update, delete: if false;
       }
 
       match /audit_logs/{logId} {
-        allow get: if isVerified() && isValidId(tenantId) && isValidId(logId) && (isAdmin() || isTenantManagerOrOwner(tenantId));
-        allow list: if isBootstrappedAdmin() && isValidId(tenantId);
-        allow list: if isVerified() && isValidId(tenantId) && (isAdmin() || isTenantManagerOrOwner(tenantId));
-        allow create: if isVerified() && isValidId(tenantId) && isValidId(logId) && isValidAuditLog(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId));
+        allow get: if isVerified() && isValidId(tenantId) && isValidId(logId) && (isAdmin() || isTenantManagerOrOwner(tenantId) || isAssignedTenantOwner(tenantId));
+        allow list: if isBootstrappedAdmin();
+        allow list: if isVerified() && (request.auth.uid in resource.data.memberUids);
+        allow list: if isVerified() && ('email' in request.auth.token) && resource.data.ownerEmail == request.auth.token.email.lower();
+        allow create: if isVerified() && isValidId(tenantId) && isValidId(logId) && isValidAuditLog(incoming()) && incoming().tenantId == tenantId && (isAdmin() || isTenantMember(tenantId) || isAssignedTenantOwner(tenantId));
         allow update, delete: if false;
       }
     }
