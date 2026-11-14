@@ -40,6 +40,7 @@ export function getFirebaseConfig(): FirebaseAppletConfig {
     const candidates = [
       path.resolve(process.cwd(), 'firebase-applet-config.json'),
       path.resolve(__dirname, '..', 'firebase-applet-config.json'),
+      path.resolve(__dirname, '..', '..', 'firebase-applet-config.json'),
     ];
     const configPath = candidates.find((p) => fs.existsSync(p));
     if (!configPath) {
