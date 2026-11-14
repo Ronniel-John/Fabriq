@@ -37,13 +37,15 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
     { id: 'payments', label: 'Payments & QR Ph', icon: QrCode },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'services', label: 'Services & Pricing', icon: Sparkles },
-    { id: 'security', label: 'Tenant Isolation & RBAC', icon: ShieldCheck },
-    { id: 'schema', label: 'Relational Schema', icon: Database },
     { id: 'audit', label: 'Audit Trail', icon: History },
   ];
 
   if (user?.isSuperAdmin) {
-    navItems.push({ id: 'superadmin', label: 'Super Admin Portal', icon: ShieldAlert });
+    navItems.push(
+      { id: 'security', label: 'Tenant Isolation & RBAC', icon: ShieldCheck },
+      { id: 'schema', label: 'Relational Schema', icon: Database },
+      { id: 'superadmin', label: 'Super Admin Portal', icon: ShieldAlert }
+    );
   }
 
   const handleSelectTab = (tabId: string) => {

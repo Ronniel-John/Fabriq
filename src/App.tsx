@@ -24,8 +24,11 @@ function MainApp() {
   const { isAuthenticated, isLoading, error, user, tenant, logout } = useAuth();
 
   React.useEffect(() => {
-    if (isAuthenticated && user?.isSuperAdmin && !tenant && activeTab === 'dashboard') {
+    if (!isAuthenticated) return;
+    if (user?.isSuperAdmin && !tenant && activeTab === 'dashboard') {
       setActiveTab('superadmin');
+    } else if (!user?.isSuperAdmin && ['security', 'schema', 'superadmin'].includes(activeTab)) {
+      setActiveTab('dashboard');
     }
   }, [isAuthenticated, user?.isSuperAdmin, tenant, activeTab]);
 
@@ -112,10 +115,10 @@ function MainApp() {
           {activeTab === 'services' && <ServiceList />}
         </>
       )}
-      {activeTab === 'security' && <TenantIsolationDemo />}
-      {activeTab === 'schema' && <SchemaViewer />}
+      {user?.isSuperAdmin && activeTab === 'security' && <TenantIsolationDemo />}
+      {user?.isSuperAdmin && activeTab === 'schema' && <SchemaViewer />}
       {!needsTenant && activeTab === 'audit' && <AuditLogViewer />}
-      {!needsTenant && activeTab === 'superadmin' && <SuperAdminPortal />}
+      {user?.isSuperAdmin && !needsTenant && activeTab === 'superadmin' && <SuperAdminPortal />}
     </AppShell>
   );
 }

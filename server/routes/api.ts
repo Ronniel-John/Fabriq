@@ -1625,7 +1625,7 @@ api.get(
 /**
  * Interactive Database Schema Inspector.
  */
-api.get('/system/schema', (_req, res) => {
+api.get('/system/schema', requireAuth, requireSuperAdmin, (_req, res) => {
   const tables = [
     {
       tableName: 'tenants',
@@ -1823,6 +1823,8 @@ api.get('/system/schema', (_req, res) => {
  */
 api.post(
   '/system/test-cross-tenant-boundary',
+  requireAuth,
+  requireSuperAdmin,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { attackerUserId, victimTenantId } = req.body as {
       attackerUserId?: string;

@@ -23,7 +23,7 @@ interface DashboardProps {
 }
 
 export const OverviewDashboard: React.FC<DashboardProps> = ({ onNavigate, onNewOrder }) => {
-  const { tenant, currentRole } = useAuth();
+  const { user, tenant, currentRole } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,13 +96,15 @@ export const OverviewDashboard: React.FC<DashboardProps> = ({ onNavigate, onNewO
           >
             Orders Queue
           </button>
-          <button
-            onClick={() => onNavigate('security')}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 rounded-xl hover:bg-slate-800 active:scale-[0.98] transition-all text-center min-h-[42px]"
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="whitespace-nowrap">Verify Security</span>
-          </button>
+          {user?.isSuperAdmin && (
+            <button
+              onClick={() => onNavigate('security')}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 rounded-xl hover:bg-slate-800 active:scale-[0.98] transition-all text-center min-h-[42px]"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="whitespace-nowrap">Verify Security</span>
+            </button>
+          )}
         </div>
       </div>
 
