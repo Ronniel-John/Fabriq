@@ -77,7 +77,7 @@ export const OrderList: React.FC<OrderListProps> = ({
     try {
       setUpdatingStatus(true);
       setErrorBanner(null);
-      await api.updateOrderStatus(tenant.id, orderId, newStatus, `Staff updated order status via LaundryOS`);
+      await api.updateOrderStatus(tenant.id, orderId, newStatus, `Staff updated order status via Fabriq`);
       fetchOrders();
     } catch (err) {
       console.error('Failed to update order status:', err);

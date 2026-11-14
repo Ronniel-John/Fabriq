@@ -254,6 +254,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const updatedCurrent = meData.tenants.find((t) => t.id === tenant.id);
         if (updatedCurrent) setTenant(updatedCurrent);
       } else if (meData.tenants[0]) {
+        api.setContext(meData.user.id, meData.tenants[0].id);
         setTenant(meData.tenants[0]);
       }
     }

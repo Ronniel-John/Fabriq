@@ -31,7 +31,7 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'healthy',
-      app: 'LaundryOS Multi-Tenant SaaS',
+      app: 'Fabriq Multi-Tenant SaaS',
       database: 'Cloud Firestore (ai-studio-laundryosmultite-80576504-c141-4d16-a217-226de2b938ed)',
       version: '1.1.0-firestore',
       environment: process.env.NODE_ENV || 'development',
@@ -65,11 +65,11 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`LaundryOS Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Fabriq Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('Failed to start LaundryOS server:', err);
+  console.error('Failed to start Fabriq server:', err);
   process.exit(1);
 });

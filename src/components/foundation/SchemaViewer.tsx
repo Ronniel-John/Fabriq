@@ -24,7 +24,7 @@ export const SchemaViewer: React.FC = () => {
 
   const handleCopyDDL = () => {
     // Basic DDL snippet
-    const ddl = `-- PostgreSQL Schema for LaundryOS Multi-Tenant Architecture
+    const ddl = `-- PostgreSQL Schema for Fabriq Multi-Tenant Architecture
 -- See /src/db/schema.sql for the complete production DDL`;
     navigator.clipboard.writeText(ddl);
     setCopied(true);

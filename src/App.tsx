@@ -23,6 +23,12 @@ function MainApp() {
   const [orderIntent, setOrderIntent] = useState<{ openNew: boolean; customerId?: string } | null>(null);
   const { isAuthenticated, isLoading, error, user, tenant, logout } = useAuth();
 
+  React.useEffect(() => {
+    if (isAuthenticated && user?.isSuperAdmin && !tenant && activeTab === 'dashboard') {
+      setActiveTab('superadmin');
+    }
+  }, [isAuthenticated, user?.isSuperAdmin, tenant, activeTab]);
+
   const openCounterOrder = (customerId?: string) => {
     setOrderIntent({ openNew: true, customerId });
     setActiveTab('orders');
@@ -32,7 +38,7 @@ function MainApp() {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="w-10 h-10 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
-        <h2 className="text-base font-bold text-slate-800">Initializing LaundryOS Session</h2>
+        <h2 className="text-base font-bold text-slate-800">Initializing Fabriq Session</h2>
         <p className="text-xs text-slate-500 mt-1">
           Connecting to authentication services & verifying tenant access...
         </p>

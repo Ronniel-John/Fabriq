@@ -274,7 +274,7 @@ export const SuperAdminPortal: React.FC = () => {
               Registered Laundry Shops ({tenants.length})
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Independent businesses operating on LaundryOS with isolated Firestore partitions
+              Independent businesses operating on Fabriq with isolated Firestore partitions
             </p>
           </div>
         </div>
@@ -627,7 +627,7 @@ export const SuperAdminPortal: React.FC = () => {
                 />
                 <p className="text-[11px] text-indigo-800 leading-relaxed">
                   When this owner signs in via <strong>Continue with Google</strong> with this Gmail/Workspace address,
-                  LaundryOS automatically grants them Owner access to this shop.
+                  Fabriq automatically grants them Owner access to this shop.
                 </p>
               </div>
 

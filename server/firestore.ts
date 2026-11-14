@@ -357,6 +357,39 @@ export async function queryTenantsByOwnerEmail(email: string, idToken: string): 
   return tenants;
 }
 
+export async function queryAllTenants(idToken: string): Promise<Tenant[]> {
+  const { projectId, firestoreDatabaseId } = getFirebaseConfig();
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${firestoreDatabaseId}/documents:runQuery`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'tenants' }],
+        limit: 200,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Firestore RUNQUERY tenants failed (${res.status}): ${errText}`);
+  }
+
+  const rows = (await res.json()) as Array<{ document?: { fields?: Record<string, FirestoreValue> } }>;
+  const tenants: Tenant[] = [];
+  for (const row of rows) {
+    if (row.document?.fields) {
+      tenants.push(fromFirestoreFields<Tenant>(row.document.fields));
+    }
+  }
+  return tenants;
+}
+
 // ============================================================================
 // LAUNDRYOS CLOUD FIRESTORE REPOSITORY
 // ============================================================================
@@ -388,7 +421,7 @@ class FirestoreRepository {
         id: fbUser.uid,
         authUid: fbUser.uid,
         email: fbUser.email,
-        fullName: fbUser.displayName || fbUser.email.split('@')[0] || 'LaundryOS User',
+        fullName: fbUser.displayName || fbUser.email.split('@')[0] || 'Fabriq User',
         avatarUrl: fbUser.photoUrl || '',
         isSuperAdmin: isAdminEmail,
         createdAt: now,
@@ -423,7 +456,9 @@ class FirestoreRepository {
 
     if (isAdminEmail) {
       tenants = await listFirestoreCollection<Tenant>('tenants', idToken).catch(async () => {
-        return queryTenantsByMemberUid(fbUser.uid, idToken).catch(() => []);
+        return queryAllTenants(idToken).catch(async () => {
+          return queryTenantsByMemberUid(fbUser.uid, idToken).catch(() => []);
+        });
       });
     } else {
       // For non-admin users, query both memberUids and assigned ownerEmail via filtered :runQuery.
@@ -529,7 +564,7 @@ class FirestoreRepository {
       }
       return Array.from(mapById.values());
     }
-    return listFirestoreCollection<Tenant>('tenants', idToken);
+    return listFirestoreCollection<Tenant>('tenants', idToken).catch(() => queryAllTenants(idToken));
   }
 
   public async getTenantById(tenantId: string, idToken: string): Promise<Tenant | null> {
@@ -702,8 +737,8 @@ class FirestoreRepository {
     return logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  public async getAllAdminAuditLogs(idToken: string): Promise<AuditLog[]> {
-    const tenants = await this.getTenants(idToken);
+  public async getAllAdminAuditLogs(idToken: string, fbUser?: VerifiedFirebaseUser): Promise<AuditLog[]> {
+    const tenants = await this.getTenants(idToken, fbUser);
     const logsPerTenant = await Promise.all(
       tenants.map((t) => listFirestoreCollection<AuditLog>(`tenants/${t.id}/audit_logs`, idToken).catch(() => []))
     );

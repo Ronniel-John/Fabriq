@@ -72,10 +72,10 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
               className="flex items-center gap-2 text-left group"
             >
               <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white font-bold text-xs sm:text-sm tracking-wider shadow-xs group-hover:bg-slate-800 transition-colors">
-                L
+                F
               </span>
               <span className="text-sm sm:text-base font-bold tracking-tight text-slate-900 whitespace-nowrap hidden xs:inline">
-                LaundryOS
+                Fabriq
               </span>
             </button>
           </div>
@@ -223,7 +223,7 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
                       className="w-full text-left px-3 py-2 rounded-lg text-rose-600 hover:bg-rose-50 flex items-center gap-2 font-medium transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
-                      <span>Log Out of LaundryOS</span>
+                      <span>Log Out of Fabriq</span>
                     </button>
                   </div>
                 </div>
@@ -295,9 +295,9 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <span className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center text-white font-bold text-xs tracking-wider">
-                    L
+                    F
                   </span>
-                  <span className="text-base font-bold text-slate-900">LaundryOS</span>
+                  <span className="text-base font-bold text-slate-900">Fabriq</span>
                 </div>
                 <button
                   onClick={() => setMobileDrawerOpen(false)}
@@ -358,7 +358,7 @@ export const AppShell: React.FC<AppShellProps> = ({ currentTab, onTabChange, chi
                   className="w-full flex items-center gap-2.5 px-3 py-3 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors min-h-[44px]"
                 >
                   <LogOut className="w-4 h-4 shrink-0" />
-                  <span>Log Out of LaundryOS</span>
+                  <span>Log Out of Fabriq</span>
                 </button>
               </div>
             </div>

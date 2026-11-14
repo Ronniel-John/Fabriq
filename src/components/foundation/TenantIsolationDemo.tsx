@@ -147,7 +147,7 @@ export const TenantIsolationDemo: React.FC = () => {
                 {testResult.blocked ? (
                   <>
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                    <span>Security Verification PASSED: Access Blocked by LaundryOS Middleware</span>
+                    <span>Security Verification PASSED: Access Blocked by Fabriq Middleware</span>
                   </>
                 ) : (
                   <>
@@ -179,7 +179,7 @@ export const TenantIsolationDemo: React.FC = () => {
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
         <h3 className="text-base font-semibold text-slate-900">Application Roles & Enforcement Matrix</h3>
         <p className="text-xs text-slate-600">
-          LaundryOS enforces 5 distinct roles with server-side middleware validation on every route:
+          Fabriq enforces 5 distinct roles with server-side middleware validation on every route:
         </p>
 
         <div className="overflow-x-auto">

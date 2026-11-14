@@ -433,7 +433,8 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
     const now = new Date().toISOString();
     const ownerUid = req.firebaseUser?.uid || req.user!.id;
 
-    const newTenant = serverDb.createTenant({
+    const newTenant = {
+      id: `t-${baseSlug}-${crypto.randomUUID().slice(0, 8)}`,
       slug: baseSlug,
       name: name.trim().slice(0, 255),
       tradeName: (tradeName?.trim() || name.trim()).slice(0, 255),
@@ -442,15 +443,17 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
       contactPhone: (contactPhone?.trim() || '+63 917 000 0000').slice(0, 64),
       ...(normalizedOwnerEmail ? { ownerEmail: normalizedOwnerEmail.slice(0, 255) } : {}),
       currency: 'PHP',
-    });
+      createdAt: now,
+      updatedAt: now,
+    };
 
     const newBranch: Branch = {
       id: `b-${baseSlug}-01`,
       tenantId: newTenant.id,
-      name: branchName.trim() || 'Main Branch',
+      name: (branchName.trim() || 'Main Branch').slice(0, 255),
       code: 'MAIN-01',
-      address: branchAddress.trim() || 'Philippines',
-      phone: contactPhone?.trim() || '+63 917 000 0000',
+      address: (branchAddress.trim() || 'Philippines').slice(0, 500),
+      phone: (contactPhone?.trim() || '+63 917 000 0000').slice(0, 64),
       isMain: true,
       isActive: true,
       createdAt: now,
@@ -507,24 +510,7 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
       updatedAt: now,
     };
 
-    // Update local JSON store
-    const localState = serverDb.getState();
-    localState.branches.push(newBranch);
-    localState.tenant_memberships.push({
-      id: newMembership.id,
-      tenantId: newMembership.tenantId,
-      userId: newMembership.userId,
-      role: newMembership.role,
-      status: newMembership.status,
-      branchId: newMembership.branchId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    localState.subscriptions.push(newSubscription);
-    localState.services.push(starterService);
-    serverDb.commitChanges();
-
-    // Persist to Cloud Firestore when authenticated with Firebase token
+    // Persist to Cloud Firestore first when authenticated with Firebase token
     if (req.firebaseIdToken) {
       await firestoreRepo.saveTenant(
         {
@@ -539,6 +525,24 @@ api.post('/tenants', requireAuth, requireSuperAdmin, async (req: AuthenticatedRe
       await firestoreRepo.saveSubscription(newSubscription, req.firebaseIdToken);
       await firestoreRepo.saveService(newTenant.id, starterService, req.firebaseIdToken);
     }
+
+    // Update local JSON store after Firestore succeeds
+    const localState = serverDb.getState();
+    localState.tenants.push(newTenant);
+    localState.branches.push(newBranch);
+    localState.tenant_memberships.push({
+      id: newMembership.id,
+      tenantId: newMembership.tenantId,
+      userId: newMembership.userId,
+      role: newMembership.role,
+      status: newMembership.status,
+      branchId: newMembership.branchId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    localState.subscriptions.push(newSubscription);
+    localState.services.push(starterService);
+    serverDb.commitChanges();
 
     await recordAudit(req, {
       tenantId: newTenant.id,
@@ -1601,7 +1605,7 @@ api.get(
   requireSuperAdmin,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (req.firebaseIdToken) {
-      const fsLogs = await firestoreRepo.getAllAdminAuditLogs(req.firebaseIdToken);
+      const fsLogs = await firestoreRepo.getAllAdminAuditLogs(req.firebaseIdToken, req.firebaseUser);
       res.json(fsLogs);
       return;
     }
@@ -1863,7 +1867,7 @@ api.post(
         blocked: true,
         statusCode: 403,
         securityStatus: 'PASSED_SECURE',
-        message: `Cross-tenant access securely blocked by LaundryOS middleware! User "${user.fullName}" (${user.email}) has no authorization to access "${victimTenant.name}".`,
+        message: `Cross-tenant access securely blocked by Fabriq middleware! User "${user.fullName}" (${user.email}) has no authorization to access "${victimTenant.name}".`,
         auditLogged: true,
         details: {
           user: { id: user.id, email: user.email },
